@@ -1,0 +1,333 @@
+#!/usr/bin/env python3
+"""Gloss -- read a paper with a summary of every paragraph in the margin.
+
+Local Flask server plus a browser page.  Start it with run.command, or:
+
+    ~/.venvs/gloss/bin/python app.py
+
+Nothing leaves this machine except the paragraph text sent to the configured
+LLM provider for summarizing -- and with a local provider (Ollama), not even
+that.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import socket
+import subprocess
+import threading
+import webbrowser
+from pathlib import Path
+
+import pymupdf
+from flask import Flask, Response, abort, jsonify, render_template, request
+
+import extract
+import llm
+import summarize
+
+__version__ = "1.0"
+
+CACHE_DIR = Path.home() / ".cache" / "gloss"
+PAGE_DIR = CACHE_DIR / "pages"
+UPLOAD_DIR = CACHE_DIR / "uploads"
+RECENTS = CACHE_DIR / "recents.json"
+RENDER_DPI = 144          # 2x the PDF's native 72 dpi, so pages stay sharp
+MAX_RECENTS = 12
+
+app = Flask(__name__)
+
+# sha -> everything known about one open document.  Single-user local app, so a
+# dict behind a lock is the whole state layer.
+_docs: dict[str, dict] = {}
+_lock = threading.Lock()
+
+
+# --- helpers ----------------------------------------------------------------
+
+def _recents() -> list:
+    try:
+        return json.loads(RECENTS.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _remember(path: str, title: str) -> None:
+    entries = [e for e in _recents() if e.get("path") != path]
+    entries.insert(0, {"path": path, "title": title})
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        RECENTS.write_text(json.dumps(entries[:MAX_RECENTS]))
+    except OSError:
+        pass
+
+
+def _title_for(path: str, doc: dict) -> str:
+    return os.path.splitext(os.path.basename(path))[0]
+
+
+def _start_summaries(sha: str) -> None:
+    """Run both passes in the background so the reader is usable immediately."""
+    entry = _docs[sha]
+
+    def work():
+        try:
+            brief = summarize.build_brief(entry["doc"], sha)
+            with _lock:
+                entry["brief"] = brief
+                entry["stage"] = "paragraphs"
+
+            def publish(chunk):
+                with _lock:
+                    entry["summaries"].update(chunk)
+
+            _, failures = summarize.summarize_document(
+                entry["doc"], sha, brief, on_results=publish)
+            with _lock:
+                entry["failures"] = [pid for pid, _ in failures]
+                entry["stage"] = "done"
+        except summarize.SummarizerUnavailable as exc:
+            with _lock:
+                entry["stage"] = "error"
+                entry["error"] = str(exc)
+        except Exception as exc:                            # noqa: BLE001
+            with _lock:
+                entry["stage"] = "error"
+                entry["error"] = f"{type(exc).__name__}: {exc}"
+
+    thread = threading.Thread(target=work, daemon=True)
+    entry["thread"] = thread
+    thread.start()
+
+
+def _open_pdf(path: str) -> dict:
+    """Extract a PDF (or return the already-open one) and kick off summarizing."""
+    path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    sha = summarize.sha_of(path)
+    with _lock:
+        if sha in _docs:
+            _remember(path, _docs[sha]["title"])
+            return {"sha": sha, "title": _docs[sha]["title"], "path": path}
+
+    doc = extract.extract(path)                  # may raise NoTextLayer
+    title = _title_for(path, doc)
+    with _lock:
+        _docs[sha] = {
+            "path": path,
+            "title": title,
+            "doc": doc,
+            "brief": "",
+            "summaries": {},
+            "failures": [],
+            "stage": "brief",
+            "error": "",
+        }
+    _remember(path, title)
+    _start_summaries(sha)
+    # The path goes back to the browser so closing a document can return to a
+    # Recent list that includes it; the list itself was rendered at page load.
+    return {"sha": sha, "title": title, "path": path}
+
+
+def _entry(sha: str) -> dict:
+    entry = _docs.get(sha)
+    if not entry:
+        abort(404)
+    return entry
+
+
+# --- routes -----------------------------------------------------------------
+
+@app.route("/")
+def index():
+    warning = summarize.check_ready()
+    provider = ""
+    if not warning:
+        try:
+            provider = llm.settings().describe()
+        except Exception:                                   # noqa: BLE001
+            provider = ""
+    return render_template("index.html", version=__version__,
+                           recents=_recents(), warning=warning,
+                           provider=provider)
+
+
+@app.route("/api/pick", methods=["POST"])
+def pick():
+    """Open the native macOS file chooser.
+
+    A local app should feel like a Mac app; osascript gives a real Finder dialog
+    without bundling one.  Drag-and-drop (below) is the fallback everywhere else.
+    """
+    script = ('POSIX path of (choose file with prompt "Choose a PDF" '
+              'of type {"com.adobe.pdf", "pdf"})')
+    try:
+        result = subprocess.run(["osascript", "-e", script],
+                                capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired):
+        return jsonify({"error": "Could not open the file chooser."}), 500
+    if result.returncode != 0:
+        return jsonify({"cancelled": True})       # user pressed Cancel
+    return _ingest(result.stdout.strip())
+
+
+@app.route("/api/open", methods=["POST"])
+def open_path():
+    return _ingest((request.json or {}).get("path", ""))
+
+
+@app.route("/api/upload", methods=["POST"])
+def upload():
+    """Accept a dragged-in PDF, since browsers withhold real paths."""
+    handle = request.files.get("file")
+    if not handle or not handle.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "Please drop a PDF file."}), 400
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    target = UPLOAD_DIR / os.path.basename(handle.filename)
+    handle.save(target)
+    return _ingest(str(target))
+
+
+def _ingest(path: str):
+    if not path:
+        return jsonify({"error": "No file chosen."}), 400
+    try:
+        return jsonify(_open_pdf(path))
+    except extract.NoTextLayer as exc:
+        return jsonify({"error": str(exc), "kind": "no-text"}), 422
+    except FileNotFoundError:
+        return jsonify({"error": f"File not found: {path}"}), 404
+    except Exception as exc:                                # noqa: BLE001
+        return jsonify({"error": f"Could not open that PDF: {exc}"}), 500
+
+
+@app.route("/api/doc/<sha>")
+def get_doc(sha):
+    entry = _entry(sha)
+    return jsonify({
+        "sha": sha,
+        "title": entry["title"],
+        "path": entry["path"],
+        "pages": entry["doc"]["pages"],
+        "paragraphs": entry["doc"]["paragraphs"],
+    })
+
+
+@app.route("/api/page/<sha>/<int:number>.png")
+def page_image(sha, number):
+    entry = _entry(sha)
+    folder = PAGE_DIR / sha
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{number}.png"
+    if not target.exists():
+        with pymupdf.open(entry["path"]) as pdf:
+            if number < 0 or number >= pdf.page_count:
+                abort(404)
+            pixmap = pdf[number].get_pixmap(dpi=RENDER_DPI)
+            pixmap.save(target)
+    return Response(target.read_bytes(), mimetype="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.route("/api/summaries/<sha>")
+def get_summaries(sha):
+    entry = _entry(sha)
+    with _lock:
+        return jsonify({
+            "summaries": dict(entry["summaries"]),
+            "failures": list(entry["failures"]),
+            "stage": entry["stage"],
+            "error": entry["error"],
+            "brief": entry["brief"],
+        })
+
+
+@app.route("/api/resummarize", methods=["POST"])
+def resummarize():
+    body = request.json or {}
+    entry = _entry(body.get("sha", ""))
+    try:
+        pid = int(body.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "bad paragraph id"}), 400
+    try:
+        text = summarize.resummarize(entry["doc"], body["sha"], entry["brief"], pid)
+    except Exception as exc:                                # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
+    with _lock:
+        entry["summaries"][str(pid)] = text
+        entry["failures"] = [f for f in entry["failures"] if f != pid]
+    return jsonify({"id": pid, "summary": text})
+
+
+@app.route("/api/ask", methods=["POST"])
+def ask():
+    """Answer a question about the open document."""
+    body = request.json or {}
+    entry = _entry(body.get("sha", ""))
+    question = (body.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "Ask a question first."}), 400
+    if len(question) > 2000:
+        return jsonify({"error": "That question is too long."}), 400
+    try:
+        answer, cited = summarize.answer_question(
+            entry["doc"], entry["brief"], question)
+    except summarize.SummarizerUnavailable as exc:
+        return jsonify({"error": str(exc)}), 503
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:                                # noqa: BLE001
+        return jsonify({"error": f"Could not answer that: {exc}"}), 500
+    return jsonify({"question": question, "answer": answer, "cited": cited})
+
+
+@app.route("/debug/<sha>/<int:number>")
+def debug_page(sha, number):
+    """Page image with every detected paragraph boxed -- for tuning extraction."""
+    entry = _entry(sha)
+    with pymupdf.open(entry["path"]) as pdf:
+        if number < 0 or number >= pdf.page_count:
+            abort(404)
+        page = pdf[number]
+        for para in entry["doc"]["paragraphs"]:
+            for rect in para["rects"]:
+                if rect["page"] != number:
+                    continue
+                colour = (0.8, 0.1, 0.1) if para["summarizable"] else (0.4, 0.4, 0.9)
+                page.draw_rect(pymupdf.Rect(rect["bbox"]), color=colour, width=0.8)
+        buffer = io.BytesIO(page.get_pixmap(dpi=110).tobytes("png"))
+    return Response(buffer.getvalue(), mimetype="image/png")
+
+
+def _free_port(preferred=5017):
+    for port in (preferred, 5018, 5019, 0):
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+                return probe.getsockname()[1]
+            except OSError:
+                continue
+    return 5017
+
+
+if __name__ == "__main__":
+    port = _free_port()
+    url = f"http://127.0.0.1:{port}/"
+    print(f"Gloss {__version__} running at {url}")
+    notice = summarize.check_ready()
+    if notice:
+        print(f"  NOTE: {notice}")
+    else:
+        # Name the provider and model: a misconfiguration is otherwise only
+        # visible once a summary silently comes from the wrong place.
+        try:
+            print(f"  Using {llm.settings().describe()}")
+        except Exception:                                   # noqa: BLE001
+            pass
+    threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+    app.run(host="127.0.0.1", port=port, threaded=True, debug=False)

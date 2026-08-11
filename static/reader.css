@@ -1,0 +1,279 @@
+/* Gloss -- page on the left, summary margin on the right. */
+
+:root {
+  --bg: #f2f1ee;
+  --panel: #ffffff;
+  --ink: #1c1b19;
+  --ink-soft: #5d5a54;
+  --line: #ddd9d2;
+  --accent: #7a1c1c;          /* Texas A&M maroon */
+  --accent-soft: #f3e4e4;
+  --highlight: rgba(160, 40, 40, 0.16);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.10), 0 6px 18px rgba(0, 0, 0, 0.05);
+  --bar-h: 52px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1917;
+    --panel: #232220;
+    --ink: #ece9e3;
+    --ink-soft: #a9a49b;
+    --line: #38352f;
+    --accent: #e0908f;
+    --accent-soft: #3a2626;
+    --highlight: rgba(224, 144, 143, 0.22);
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.35);
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* Class selectors like `.drop { display: grid }` outrank the user agent's
+   `[hidden] { display: none }`, so hidden panels would otherwise stay visible. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- toolbar -------------------------------------------------------------- */
+
+/* Every control in the toolbar acts on the open document -- close, zoom, the
+   margin toggle, the question panel -- so the whole bar belongs to the reader
+   and the start screen stands on its own. Driven by a class rather than
+   `hidden` so nothing flashes before the script runs. */
+body:not(.reading) .bar { display: none; }
+
+.bar {
+  position: sticky; top: 0; z-index: 40;
+  height: var(--bar-h);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 0 16px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: saturate(1.6) blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+.bar-left, .bar-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.title {
+  font-weight: 550; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 46vw; color: var(--ink);
+}
+.status { color: var(--ink-soft); font-size: 13px; white-space: nowrap; }
+.status .spinner {
+  display: inline-block; width: 11px; height: 11px; margin-right: 6px;
+  vertical-align: -1px;
+  border: 2px solid var(--line); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.btn {
+  font: inherit; font-size: 13px; color: var(--ink);
+  background: var(--panel); border: 1px solid var(--line);
+  padding: 6px 12px; border-radius: 7px; cursor: pointer;
+}
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.big { font-size: 15px; padding: 10px 22px; border-radius: 9px; }
+.btn.icon { padding: 4px 9px; font-size: 15px; line-height: 1; }
+.btn[aria-pressed="false"] { opacity: 0.55; }
+.zoom { display: flex; align-items: center; gap: 6px; }
+.zoom span { font-size: 12px; color: var(--ink-soft); min-width: 40px; text-align: center; }
+
+/* --- notices -------------------------------------------------------------- */
+
+.notice { padding: 10px 16px; font-size: 13px; border-bottom: 1px solid var(--line); }
+.notice.warn { background: #fdf3d8; color: #6b4e07; }
+.notice.error { background: #fbe4e4; color: #7a1c1c; }
+@media (prefers-color-scheme: dark) {
+  .notice.warn { background: #3a3212; color: #f0dfa8; }
+  .notice.error { background: #3d2020; color: #f2c3c3; }
+}
+
+/* --- start screen --------------------------------------------------------- */
+
+.start { display: grid; place-items: center; padding: 8vh 20px; }
+.start-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 40px; max-width: 560px; box-shadow: var(--shadow); text-align: center;
+}
+.start-card h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: -0.02em; }
+.start-card p { margin: 0 0 20px; color: var(--ink-soft); }
+.define {
+  font-size: 13px; margin-bottom: 18px !important;
+  padding-bottom: 14px; border-bottom: 1px solid var(--line);
+}
+.define em { color: var(--accent); font-style: italic; }
+.hint { font-size: 13px; margin-top: 12px !important; }
+.provider { font-size: 12px; margin-bottom: 14px !important; }
+.provider code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: 4px; padding: 2px 6px; color: var(--ink-soft);
+}
+.recents { margin-top: 28px; text-align: left; border-top: 1px solid var(--line); padding-top: 18px; }
+.recents h2 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-soft); margin: 0 0 8px;
+}
+.recents ul { list-style: none; margin: 0; padding: 0; }
+.recent {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  padding: 7px 8px; border-radius: 6px; font: inherit; font-size: 13px;
+  color: var(--ink); cursor: pointer; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.recent:hover { background: var(--accent-soft); }
+
+/* --- document layout ------------------------------------------------------ */
+
+.reader { padding: 28px 24px 120px; }
+.doc { position: relative; margin: 0 auto; }
+.pages { position: relative; }
+
+.page { position: relative; margin: 0 0 22px; box-shadow: var(--shadow); background: #fff; }
+.page img { display: block; width: 100%; height: auto; border-radius: 2px; }
+.page-number {
+  position: absolute; left: -34px; top: 2px;
+  font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums;
+}
+
+/* Transparent hit target over each paragraph. */
+.hit { position: absolute; cursor: pointer; border-radius: 3px; }
+.hit:hover { background: color-mix(in srgb, var(--highlight) 55%, transparent); }
+.band {
+  position: absolute; pointer-events: none; border-radius: 3px;
+  background: var(--highlight);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  opacity: 0; transition: opacity 0.12s ease;
+}
+.band.on { opacity: 1; }
+
+/* --- margin --------------------------------------------------------------- */
+
+.margin { position: absolute; top: 0; }
+.doc.no-margin .margin, .doc.no-margin .leaders { display: none; }
+
+.card {
+  position: absolute; left: 0;
+  background: var(--panel); border: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  border-radius: 8px; padding: 10px 12px;
+  font-size: 12.5px; line-height: 1.45; color: var(--ink-soft);
+  transition: border-color 0.12s ease, color 0.12s ease, transform 0.12s ease;
+  cursor: pointer;
+}
+.card:hover, .card.on {
+  border-left-color: var(--accent); color: var(--ink);
+  box-shadow: var(--shadow); transform: translateX(-2px);
+}
+.card .sec {
+  display: block; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--accent); margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.card .retry {
+  background: none; border: 0; padding: 0; font: inherit; font-size: 12px;
+  color: var(--accent); cursor: pointer; text-decoration: underline;
+}
+.card.failed { border-left-color: #b4553f; }
+
+/* Placeholder shimmer while a summary is still being written. */
+.card.pending { color: transparent; user-select: none; }
+.card.pending .sec { visibility: hidden; }
+.card.pending .body { position: relative; }
+.card.pending .body::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, var(--line) 25%,
+              color-mix(in srgb, var(--line) 45%, transparent) 50%, var(--line) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 4px;
+}
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.leaders { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.leaders path { fill: none; stroke: var(--accent); stroke-width: 1.25; opacity: 0.55; }
+
+/* --- ask panel ------------------------------------------------------------ */
+
+.ask-panel {
+  position: fixed; top: var(--bar-h); right: 0; bottom: 0; z-index: 45;
+  width: 400px; max-width: 92vw;
+  display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--line);
+  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.10);
+}
+@media (prefers-color-scheme: dark) {
+  .ask-panel { box-shadow: -8px 0 30px rgba(0, 0, 0, 0.45); }
+}
+.ask-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--line);
+}
+.ask-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+
+.ask-thread { flex: 1; overflow-y: auto; padding: 16px; }
+.ask-empty { color: var(--ink-soft); font-size: 13px; margin: 0; }
+
+.ask-q {
+  font-size: 13px; font-weight: 600; margin: 0 0 8px;
+  padding-left: 10px; border-left: 3px solid var(--accent);
+}
+.ask-a {
+  font-size: 13px; line-height: 1.55; color: var(--ink-soft);
+  margin: 0 0 22px; padding-bottom: 22px; border-bottom: 1px solid var(--line);
+  white-space: pre-wrap;
+}
+.ask-a:last-child { border-bottom: 0; }
+.ask-a.failed { color: #b4553f; }
+
+/* Citations are buttons: clicking one jumps to the passage it came from. */
+.cite {
+  display: inline-block; font: inherit; font-size: 11px; font-weight: 600;
+  vertical-align: 1px; margin: 0 1px; padding: 0 5px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 0; border-radius: 4px; cursor: pointer;
+}
+.cite:hover { background: var(--accent); color: #fff; }
+
+.ask-form {
+  display: flex; gap: 8px; align-items: flex-end;
+  padding: 12px 16px; border-top: 1px solid var(--line);
+}
+.ask-form textarea {
+  flex: 1; resize: none; font: inherit; font-size: 13px; line-height: 1.4;
+  color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+}
+.ask-form textarea:focus {
+  outline: none; border-color: var(--accent);
+  background: var(--panel);
+}
+.ask-form button { flex: 0 0 auto; }
+.ask-form button:disabled { opacity: 0.5; cursor: default; }
+
+/* Flash a passage that an answer cited, so the eye finds it on the page. */
+.band.flash { opacity: 1; animation: flash 1.6s ease-out; }
+@keyframes flash {
+  0%, 40% { background: color-mix(in srgb, var(--accent) 42%, transparent); }
+  100%    { background: var(--highlight); }
+}
+
+/* --- drag and drop -------------------------------------------------------- */
+
+.drop {
+  position: fixed; inset: 0; z-index: 60;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  display: grid; place-items: center;
+}
+.drop div {
+  border: 2px dashed var(--accent); border-radius: 16px;
+  padding: 40px 60px; font-size: 17px; color: var(--accent); background: var(--panel);
+}

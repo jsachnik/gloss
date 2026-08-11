@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gloss</title>
+<link rel="stylesheet" href="/static/reader.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar-left">
+    <button id="close" class="btn primary"
+            title="Close this PDF and go back">Close</button>
+    <span id="title" class="title"></span>
+  </div>
+  <div class="bar-right">
+    <span id="status" class="status"></span>
+    <div class="zoom" role="group" aria-label="Zoom">
+      <button id="zoom-out" class="btn icon" title="Zoom out">&minus;</button>
+      <span id="zoom-level">125%</span>
+      <button id="zoom-in" class="btn icon" title="Zoom in">+</button>
+    </div>
+    <button id="toggle-margin" class="btn" title="Show or hide the summaries">Summaries</button>
+    <button id="ask" class="btn primary" disabled
+            title="Ask a question about this document (⌘K)">Question</button>
+  </div>
+</header>
+
+<aside id="ask-panel" class="ask-panel" hidden aria-label="Ask about this document">
+  <div class="ask-head">
+    <h2>Ask about this paper</h2>
+    <button id="ask-close" class="btn icon" title="Close (Esc)">&times;</button>
+  </div>
+  <div id="ask-thread" class="ask-thread">
+    <p class="ask-empty">Questions are answered from this document, with links
+       back to the passages the answer came from.</p>
+  </div>
+  <form id="ask-form" class="ask-form">
+    <textarea id="ask-input" rows="2" placeholder="What did they actually measure?"
+              aria-label="Your question"></textarea>
+    <button type="submit" class="btn primary" id="ask-send">Ask</button>
+  </form>
+</aside>
+
+{% if warning %}
+<div class="notice warn" id="key-warning">
+  <strong>Summaries are unavailable.</strong> {{ warning }}
+  The reader still opens and displays PDFs.
+</div>
+{% endif %}
+
+<div id="start" class="start">
+  <div class="start-card">
+    <h1>Gloss</h1>
+    <p class="define"><em>gloss</em>, n. &mdash; a note in the margin explaining a passage of text</p>
+    <p>Open a PDF and every paragraph gets one, written with the whole document
+       as context.</p>
+    {% if provider %}<p class="provider">Using <code>{{ provider }}</code></p>{% endif %}
+    <button id="open2" class="btn primary big">Choose a PDF</button>
+    <p class="hint">or drag one anywhere onto this window</p>
+
+    <div class="recents" id="recents" {% if not recents %}hidden{% endif %}>
+      <h2>Recent</h2>
+      <ul id="recent-list">
+        {% for item in recents %}
+        <li><button class="recent" data-path="{{ item.path }}">{{ item.title }}</button></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div id="error" class="notice error" hidden></div>
+
+<main id="reader" class="reader" hidden>
+  <div id="doc" class="doc">
+    <div id="pages" class="pages"></div>
+    <div id="margin" class="margin"></div>
+    <svg id="leaders" class="leaders" aria-hidden="true"></svg>
+  </div>
+</main>
+
+<div id="drop" class="drop" hidden><div>Drop a PDF to open it</div></div>
+
+<script src="/static/reader.js"></script>
+</body>
+</html>
