@@ -18,6 +18,8 @@ import os
 import socket
 import subprocess
 import threading
+import urllib.error
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -36,6 +38,7 @@ UPLOAD_DIR = CACHE_DIR / "uploads"
 RECENTS = CACHE_DIR / "recents.json"
 RENDER_DPI = 144          # 2x the PDF's native 72 dpi, so pages stay sharp
 MAX_RECENTS = 12
+PORTS = (5017, 5018, 5019)   # bound in order; also where a running copy is sought
 
 app = Flask(__name__)
 
@@ -154,6 +157,16 @@ def index():
     return render_template("index.html", version=__version__,
                            recents=_recents(), warning=warning,
                            provider=provider)
+
+
+@app.route("/api/health")
+def health():
+    """Identity probe used by a second launch to find this instance.
+
+    It answers with the app name rather than a bare 200 so that an unrelated
+    service already holding one of our ports is not mistaken for Gloss.
+    """
+    return jsonify({"app": "gloss", "version": __version__})
 
 
 @app.route("/api/pick", methods=["POST"])
@@ -304,21 +317,53 @@ def debug_page(sha, number):
     return Response(buffer.getvalue(), mimetype="image/png")
 
 
-def _free_port(preferred=5017):
-    for port in (preferred, 5018, 5019, 0):
+def _free_port():
+    for port in PORTS + (0,):
         with socket.socket() as probe:
             try:
                 probe.bind(("127.0.0.1", port))
                 return probe.getsockname()[1]
             except OSError:
                 continue
-    return 5017
+    return PORTS[0]
+
+
+def _running_instance():
+    """URL of a Gloss already serving on one of our ports, or '' if none is.
+
+    Without this, launching twice starts a second server on the next free port.
+    Both would work, but each keeps its own in-memory documents and summaries,
+    so the same paper opened in the two windows would be extracted and
+    summarized twice over -- and the second copy's margin notes would arrive in
+    a window the reader had stopped looking at.
+    """
+    for port in PORTS:
+        try:
+            with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/api/health", timeout=1.0) as reply:
+                payload = json.loads(reply.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, ValueError,
+                json.JSONDecodeError):
+            continue          # nothing there, or not us -- keep looking
+        if payload.get("app") == "gloss":
+            return f"http://127.0.0.1:{port}/"
+    return ""
 
 
 if __name__ == "__main__":
+    # Double-clicking run.command a second time should return the reader to the
+    # copy already running, not start a rival one.
+    if running := _running_instance():
+        print(f"Gloss is already running at {running}")
+        print("Opening it in your browser.  This window can be closed;")
+        print("the window running Gloss is the one to keep open.")
+        webbrowser.open(running)
+        raise SystemExit(0)
+
     port = _free_port()
     url = f"http://127.0.0.1:{port}/"
     print(f"Gloss {__version__} running at {url}")
+    print("Leave this window open while you read.  Press Ctrl-C to quit.")
     notice = summarize.check_ready()
     if notice:
         print(f"  NOTE: {notice}")

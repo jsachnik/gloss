@@ -18,9 +18,11 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 
 echo "Starting Gloss..."
-echo "Leave this window open while you read.  Press Ctrl-C to quit."
 echo
 
-# app.py reports the configured provider and any problem with it at startup,
-# so there's no provider-specific check to duplicate here.
+# app.py reports the configured provider and any problem with it at startup, so
+# there's no provider-specific check to duplicate here.  It also detects a copy
+# already running and reopens that one instead of starting a second server --
+# which is why the "leave this window open" notice is printed there, once it
+# knows whether this window is the one actually serving.
 exec "$VENV/bin/python" app.py
