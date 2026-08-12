@@ -217,7 +217,15 @@ function render() {
     card.addEventListener("click", () => activate(para.id, true));
     margin.appendChild(card);
     state.cards.set(para.id, card);
+    fillCard(card, para.id);
   });
+
+  // Zooming re-renders everything, so the active pair has to be marked again --
+  // otherwise the leader line lands on a card that no longer looks selected.
+  if (state.active !== null) {
+    state.cards.get(state.active)?.classList.add("on");
+    (state.bands.get(state.active) || []).forEach((b) => b.classList.add("on"));
+  }
 
   requestAnimationFrame(() => layoutCards(pageEls));
   $("zoom-level").textContent = `${Math.round(zoom * 100)}%`;
@@ -285,25 +293,15 @@ function drawLeader(id) {
 
 /* --- summaries ------------------------------------------------------------ */
 
-function applySummaries(data) {
-  Object.entries(data.summaries || {}).forEach(([id, text]) => {
-    const key = Number(id);
-    if (state.summaries[key] === text) return;
-    state.summaries[key] = text;
-    const card = state.cards.get(key);
-    if (!card) return;
-    card.classList.remove("pending", "failed");
-    card.querySelector(".body").textContent = text;
-  });
-
-  (data.failures || []).forEach((id) => {
-    if (state.failures.has(id)) return;
-    state.failures.add(id);
-    const card = state.cards.get(id);
-    if (!card) return;
+/* Put a card into whatever state its paragraph is already in.  Cards are built
+ * fresh by render(), which zooming calls, so this runs both as summaries arrive
+ * and as the margin is rebuilt -- otherwise a zoom would drop every finished
+ * summary back to "Summarizing...", with no poll still running to refill it. */
+function fillCard(card, id) {
+  const body = card.querySelector(".body");
+  if (state.failures.has(id)) {
     card.classList.remove("pending");
     card.classList.add("failed");
-    const body = card.querySelector(".body");
     body.textContent = "Couldn't summarize this paragraph. ";
     const retry = el("button", "retry");
     retry.textContent = "Try again";
@@ -314,6 +312,7 @@ function applySummaries(data) {
         const result = await post("/api/resummarize", { sha: state.sha, id });
         card.classList.remove("failed");
         state.failures.delete(id);
+        state.summaries[id] = result.summary;   // so a later zoom keeps it
         body.textContent = result.summary;
       } catch (err) {
         body.textContent = `Still failing: ${err.message}`;
@@ -321,6 +320,26 @@ function applySummaries(data) {
       requestAnimationFrame(() => layoutCards(collectPageEls()));
     });
     body.appendChild(retry);
+  } else if (state.summaries[id] !== undefined) {
+    card.classList.remove("pending", "failed");
+    body.textContent = state.summaries[id];
+  }
+}
+
+function applySummaries(data) {
+  Object.entries(data.summaries || {}).forEach(([id, text]) => {
+    const key = Number(id);
+    if (state.summaries[key] === text) return;
+    state.summaries[key] = text;
+    const card = state.cards.get(key);
+    if (card) fillCard(card, key);
+  });
+
+  (data.failures || []).forEach((id) => {
+    if (state.failures.has(id)) return;
+    state.failures.add(id);
+    const card = state.cards.get(id);
+    if (card) fillCard(card, id);
   });
 }
 
