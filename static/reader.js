@@ -9,7 +9,7 @@
 const GAP = 28;          // px between the page column and the margin
 const CARD_GAP = 8;      // minimum px between stacked cards
 const MARGIN_W = 340;
-const MAX_RECENTS = 12;  // matches app.py, which is what persists the list
+const MAX_RECENTS = 5;   // matches app.py, which is what persists the list
 
 const state = {
   sha: null,

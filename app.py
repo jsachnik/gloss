@@ -37,7 +37,7 @@ PAGE_DIR = CACHE_DIR / "pages"
 UPLOAD_DIR = CACHE_DIR / "uploads"
 RECENTS = CACHE_DIR / "recents.json"
 RENDER_DPI = 144          # 2x the PDF's native 72 dpi, so pages stay sharp
-MAX_RECENTS = 12
+MAX_RECENTS = 5
 PORTS = (5017, 5018, 5019)   # bound in order; also where a running copy is sought
 
 app = Flask(__name__)
@@ -51,9 +51,11 @@ _lock = threading.Lock()
 # --- helpers ----------------------------------------------------------------
 
 def _recents() -> list:
+    # Capped on the way in as well as on the way out, so a list saved under a
+    # larger limit shrinks to the current one instead of waiting for a write.
     try:
-        return json.loads(RECENTS.read_text())
-    except (OSError, json.JSONDecodeError):
+        return json.loads(RECENTS.read_text())[:MAX_RECENTS]
+    except (OSError, json.JSONDecodeError, TypeError):
         return []
 
 
