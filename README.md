@@ -172,6 +172,17 @@ image. Red boxes get summarized, blue ones are too short to need it.
   automatically drops to 2 parallel requests and a 15-minute timeout for local
   providers, because one local server queues rather than parallelizes.
 
+## Versions
+
+The running version is shown beside the wordmark on the opening screen, printed
+at startup, and served by `/api/health`. [CHANGELOG.md](CHANGELOG.md) records
+what each one changed.
+
+Because a running server serves the code it was started with, relaunching after
+an edit returns you to the old copy — the terminal points this out when the two
+versions differ. Press Ctrl-C in the window running Gloss and start it again to
+pick up newer code.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

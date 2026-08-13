@@ -30,6 +30,9 @@ import extract
 import llm
 import summarize
 
+# The one place the version is written down.  It reaches the opening screen,
+# the /api/health probe below, and the startup banner from here; what changed in
+# each version is recorded in CHANGELOG.md.
 __version__ = "1.0"
 
 CACHE_DIR = Path.home() / ".cache" / "gloss"
@@ -331,13 +334,17 @@ def _free_port():
 
 
 def _running_instance():
-    """URL of a Gloss already serving on one of our ports, or '' if none is.
+    """(url, version) of a Gloss already serving on one of our ports, or ("", "").
 
     Without this, launching twice starts a second server on the next free port.
     Both would work, but each keeps its own in-memory documents and summaries,
     so the same paper opened in the two windows would be extracted and
     summarized twice over -- and the second copy's margin notes would arrive in
     a window the reader had stopped looking at.
+
+    The version comes back too because the copy already running is running the
+    code it was started with.  Edit Gloss, relaunch, and you are handed the old
+    server without a word -- the new code appears to have done nothing at all.
     """
     for port in PORTS:
         try:
@@ -348,15 +355,23 @@ def _running_instance():
                 json.JSONDecodeError):
             continue          # nothing there, or not us -- keep looking
         if payload.get("app") == "gloss":
-            return f"http://127.0.0.1:{port}/"
-    return ""
+            return f"http://127.0.0.1:{port}/", str(payload.get("version", ""))
+    return "", ""
 
 
 if __name__ == "__main__":
     # Double-clicking run.command a second time should return the reader to the
     # copy already running, not start a rival one.
-    if running := _running_instance():
+    running, running_version = _running_instance()
+    if running:
         print(f"Gloss is already running at {running}")
+        if running_version != __version__:
+            # Reusing it would serve the code that copy started with, which is
+            # how an update can look like it did nothing.
+            print(f"  NOTE: that copy is version {running_version or 'unknown'}; "
+                  f"this one is {__version__}.")
+            print("  To run the newer code, press Ctrl-C in the window running")
+            print("  Gloss and start it again.")
         print("Opening it in your browser.  This window can be closed;")
         print("the window running Gloss is the one to keep open.")
         webbrowser.open(running)

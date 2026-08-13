@@ -104,6 +104,13 @@ body:not(.reading) .bar { display: none; }
   padding: 40px; max-width: 560px; box-shadow: var(--shadow); text-align: center;
 }
 .start-card h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: -0.02em; }
+/* Set beside the wordmark rather than tucked in a corner: it is the first
+   thing to check when the reader does not behave the way an update said it
+   would. */
+.start-card h1 .version {
+  font-size: 12px; font-weight: 500; letter-spacing: 0;
+  color: var(--ink-soft); vertical-align: 12px;
+}
 .start-card p { margin: 0 0 20px; color: var(--ink-soft); }
 .define {
   font-size: 13px; margin-bottom: 18px !important;
