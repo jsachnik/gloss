@@ -165,6 +165,29 @@ def _ratio(part, whole):
     return part / whole if whole else 0.0
 
 
+def _inked(spans):
+    """The spans of a line that actually put marks on the page.
+
+    Elsevier justifies by stretching the spaces rather than the words, and
+    stores each stretched space as its own span at a *larger* font size: in one
+    Energy paper the words are set at 7.97 pt and every space between them at
+    9.96 pt.  A line's size taken over all its spans is then the space's size,
+    not the text's, so every multi-word line in the document -- 1657 of 2460 --
+    missed the body size by 2 pt and was filtered out as furniture.  What
+    survived was the lines with no spaces in them: table cells and lone
+    citations, none long enough to summarize, so the reader came up with pages
+    but not one margin note.
+
+    Whitespace has no size worth reading, so measure the line by its glyphs.
+    """
+    return [s for s in spans if s["text"].strip()] or list(spans)
+
+
+def _line_size(spans) -> float:
+    """The font size a line reads as: the largest of its inked spans."""
+    return max(round(s["size"], 1) for s in _inked(spans))
+
+
 def _sampled_pages(doc):
     """Page numbers to measure font sizes on: the opening, then a spread.
 
@@ -213,7 +236,7 @@ def _body_sizes(doc):
                 text = "".join(s["text"] for s in spans).strip()
                 if not text or not spans:
                     continue
-                size = max(round(s["size"], 1) for s in spans)
+                size = _line_size(spans)
                 lengths.setdefault(size, []).append(len(text))
                 # Weight by span rather than by line so a line mixing sizes is
                 # attributed to each.
@@ -269,12 +292,12 @@ def _raw_lines(page):
                     (rect & img).get_area() > IMG_OVERLAP * rect.get_area()
                     for img in images):
                 continue
-            spans = line["spans"]
+            spans = _inked(line["spans"])
             out.append(Line(
                 page=page.number,
                 bbox=list(line["bbox"]),
                 text=text,
-                size=max(round(s["size"], 1) for s in spans),
+                size=_line_size(spans),
                 bold=any(s["flags"] & 16 or "bold" in s["font"].lower()
                          for s in spans),
             ))
