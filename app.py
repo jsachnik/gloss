@@ -33,7 +33,7 @@ import summarize
 # The one place the version is written down.  It reaches the opening screen,
 # the /api/health probe below, and the startup banner from here; what changed in
 # each version is recorded in CHANGELOG.md.
-__version__ = "1.0"
+__version__ = "1.0.1"
 
 CACHE_DIR = Path.home() / ".cache" / "gloss"
 PAGE_DIR = CACHE_DIR / "pages"

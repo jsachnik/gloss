@@ -71,19 +71,30 @@ SAMPLE_PAGES = 32       # further pages sampled when looking for a second one
 _SECTION_WORDS = (r"abstract|introduction|background|methods?|materials|results?|"
                   r"discussion|conclusions?|references|bibliography|acknowledge?ments?|"
                   r"appendix|supplementary|data availability|significance")
+# What separates a section number from its title.  A period or paren is the
+# usual case ("1. Introduction"), but Wiley journals set a vertical bar padded
+# with narrow no-break spaces ("3 | The Process of Scenario Planning"), and an
+# unrecognized separator is not a harmless miss: no heading after the abstract
+# is ever seen, so the running label never advances and every paragraph in the
+# paper is tagged "Abstract".  Dashes must be spaced on both sides, since an
+# unspaced one is far more likely a range ("1-2") than a heading.
+_DASHES = r"‒-―\-"
+_NUM_SEP = rf"(?:\s*[.)]\s+|\s*\|\s*|\s+[{_DASHES}]\s+)"
 # A standalone section name, optionally numbered: "Introduction", "3. Methods".
 # Anchored at both ends so a sentence merely *starting* with "Results ..." is not
 # mistaken for a heading -- that misfire put a Significance-box sentence in the
 # section slot, which would then have been fed to the model as false context.
 _SECTION_RE = re.compile(
-    rf"^\s*(\d{{1,2}}(\.\d{{1,2}})*\s*[.)]?\s*)?({_SECTION_WORDS})\s*[:.]?\s*$", re.I)
+    rf"^\s*(\d{{1,2}}(\.\d{{1,2}})*\s*[.)|{_DASHES}]?\s*)?({_SECTION_WORDS})\s*[:.]?\s*$",
+    re.I)
 # A numbered run-in heading: "1.2. Inequality of Impacts Across Subpopulations."
 # Two digits max: section numbers are 1-99, so a citation year like "2019)"
 # cannot masquerade as a numbered heading.
-_NUMBERED_RE = re.compile(r"^\s*\d{1,2}(\.\d{1,2})*\s*[.)]\s+\S")
+_NUM_PREFIX_RE = re.compile(rf"^\s*\d{{1,2}}(\.\d{{1,2}})*{_NUM_SEP}")
+_NUMBERED_RE = re.compile(rf"^\s*\d{{1,2}}(\.\d{{1,2}})*{_NUM_SEP}\S")
 _HEADING_RE = re.compile(
-    rf"^\s*((\d{{1,2}}(\.\d{{1,2}})*\s*[.)]?\s*)?({_SECTION_WORDS})\s*[:.]?\s*$"
-    r"|\s*\d{1,2}(\.\d{1,2})*\s*[.)]\s+\S)", re.I)
+    rf"^\s*((\d{{1,2}}(\.\d{{1,2}})*\s*[.)|{_DASHES}]?\s*)?({_SECTION_WORDS})\s*[:.]?\s*$"
+    rf"|\s*\d{{1,2}}(\.\d{{1,2}})*{_NUM_SEP}\S)", re.I)
 _STOP_RE = re.compile(
     r"^\s*(references|bibliography|works cited|literature cited|"
     r"acknowledge?ments?|supporting information)\s*$", re.I)
@@ -100,7 +111,7 @@ def _clean_heading(text: str) -> str:
     """
     text = re.sub(r"\s+", " ", text).strip()
     if _NUMBERED_RE.match(text):
-        head = re.match(r"^\s*\d{1,2}(\.\d{1,2})*\s*[.)]\s*", text)
+        head = _NUM_PREFIX_RE.match(text)
         rest = text[head.end():]
         cut = re.search(r"\.\s+\S", rest)
         if cut:
@@ -350,6 +361,42 @@ def _attach_drop_caps(lines, caps) -> None:
         beside[0].text = cap.text.strip() + beside[0].text
         for line in beside:
             line.bbox[0] = cap.x0
+
+
+def _join_wrapped_headings(heads, spare) -> None:
+    """Fold a heading's later lines back onto its first.
+
+    A long section title set over a narrow column wraps, and only the first
+    line carries the number that identifies it as a heading, so "2 | The
+    Construction and Characteristics of" and "Scenarios" arrive here as a
+    heading and an orphan.  The orphan is otherwise discarded -- it is neither
+    body-sized nor heading-shaped -- and every card in the section is then
+    labelled with half a title.
+
+    A continuation is recognized by geometry rather than by reading order:
+    same size and weight, sitting directly beneath with no room for a blank
+    line, and set to the same alignment.  Anything else at that size is a
+    display element of its own and is left alone.  Both lists hold one page.
+    """
+    heads.sort(key=lambda l: l.y0)
+    for head in heads:
+        while True:
+            height = max(head.y1 - head.y0, 1.0)
+            width = max(head.x1 - head.x0, 1.0)
+            below = [l for l in spare
+                     if abs(l.size - head.size) <= SIZE_TOL
+                     and l.bold == head.bold
+                     and -0.25 * height <= l.y0 - head.y1 <= 0.6 * height
+                     and (abs(l.x0 - head.x0) <= 0.1 * width
+                          or abs((l.x0 + l.x1) / 2 - (head.x0 + head.x1) / 2)
+                          <= 0.1 * width)]
+            if not below:
+                break
+            line = min(below, key=lambda l: l.y0)
+            head.text = head.text.rstrip() + " " + line.text.strip()
+            head.bbox = [min(head.x0, line.x0), head.y0,
+                         max(head.x1, line.x1), line.y1]
+            spare.remove(line)
 
 
 def _repeating_furniture(lines, n_pages) -> set:
@@ -641,17 +688,24 @@ def extract(path: str) -> dict:
 
     all_lines, heading_lines, drop_caps = [], [], []
     for page in doc:
+        page_heads, page_spare = [], []
         for line in _raw_lines(page):
             if any(abs(line.size - s) <= SIZE_TOL for s in sizes):
                 all_lines.append(line)
             elif line.size >= DROP_CAP_RATIO * largest and len(line.text.strip()) <= 2:
                 drop_caps.append(line)
-            elif line.size > largest + SIZE_TOL and len(line.text.strip()) < 120 \
-                    and _HEADING_RE.match(line.text):
+            elif line.size > largest + SIZE_TOL and len(line.text.strip()) < 120:
                 # Requiring the heading pattern keeps title blocks and pull
                 # quotes out; a wrong section label is worse than none, since
                 # it becomes misleading context in the summarization prompt.
-                heading_lines.append(line)
+                # What fails the pattern is kept aside rather than dropped
+                # outright, because a heading's own second line fails it too.
+                if _HEADING_RE.match(line.text):
+                    page_heads.append(line)
+                else:
+                    page_spare.append(line)
+        _join_wrapped_headings(page_heads, page_spare)
+        heading_lines.extend(page_heads)
 
     if len(all_lines) < MIN_BODY_LINES:
         raise NoTextLayer("This PDF has no selectable text (likely scanned).")
