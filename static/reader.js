@@ -6,7 +6,7 @@
  * the layout is stable before any image has loaded.
  */
 
-const GAP = 28;          // px between the page column and the margin
+const GAP = 28;          // px between the last ink on a page and its cards
 const CARD_GAP = 8;      // minimum px between stacked cards
 const MARGIN_W = 340;
 const MAX_RECENTS = 5;   // matches app.py, which is what persists the list
@@ -19,12 +19,18 @@ const state = {
   failures: new Set(),
   active: null,
   cards: new Map(),      // paragraph id -> card element
+  widths: { pages: 0, doc: 0 },   // px, with and without the margin column
+  columns: null,         // where the summary column starts, per page
   bands: new Map(),      // paragraph id -> [band elements]
+  rects: new Map(),      // page number -> [{id, bbox, summarizable}]
+  text: new Map(),       // page number -> [spans], as fetched
+  watcher: null,         // fills a page's text layer as it nears the viewport
   showMargin: true,
   polling: null,
 };
 
 const $ = (id) => document.getElementById(id);
+const paragraph = (id) => state.doc?.paragraphs.find((p) => p.id === id);
 const el = (tag, cls) => {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
@@ -93,6 +99,10 @@ function closeDoc() {
   state.active = null;
   state.cards.clear();
   state.bands.clear();
+  state.rects.clear();
+  state.text.clear();
+  state.watcher?.disconnect();
+  state.watcher = null;
   $("pages").innerHTML = "";
   $("margin").innerHTML = "";
   $("leaders").innerHTML = "";
@@ -145,12 +155,28 @@ function render() {
   state.cards.clear();
   state.bands.clear();
 
+  // Every paragraph rectangle, indexed by the page it sits on: the pointer is
+  // matched against these instead of against a div per rectangle, because the
+  // text layer now covers the page and would swallow the hover.
+  state.rects.clear();
+  doc.paragraphs.forEach((para) => {
+    para.rects.forEach((rect) => {
+      if (!state.rects.has(rect.page)) state.rects.set(rect.page, []);
+      state.rects.get(rect.page).push({
+        id: para.id, bbox: rect.bbox, summarizable: para.summarizable,
+      });
+    });
+  });
+
   const widest = Math.max(...doc.pages.map((p) => p.width)) * zoom;
+  const columns = cardColumns(widest);
+  state.columns = columns;
+  state.widths = { pages: widest, doc: Math.max(widest, columns.right + MARGIN_W) };
   const docEl = $("doc");
-  docEl.style.width = `${widest + GAP + MARGIN_W}px`;
+  docEl.style.width = `${state.widths.doc}px`;
   pages.style.width = `${widest}px`;
-  margin.style.left = `${widest + GAP}px`;
-  margin.style.width = `${MARGIN_W}px`;
+  margin.style.left = `${columns.base}px`;
+  margin.style.width = `${columns.right - columns.base + MARGIN_W}px`;
 
   const pageEls = [];
   doc.pages.forEach((page) => {
@@ -168,6 +194,25 @@ function render() {
     const label = el("div", "page-number");
     label.textContent = page.number + 1;
     box.appendChild(label);
+
+    // Filled once the page nears the viewport, as the image is loaded.
+    const layer = el("div", "text-layer");
+    layer.dataset.page = page.number;
+    box.appendChild(layer);
+
+    // Belt and braces: a window left in the background gets no observer
+    // callbacks, and the page under the pointer is the one about to be read.
+    box.addEventListener("mouseenter", () => loadText(layer));
+    box.addEventListener("mousemove", (event) => {
+      const id = paraAt(page.number, box, event);
+      if (id !== null) activate(id, false);
+    });
+    box.addEventListener("click", (event) => {
+      const id = paraAt(page.number, box, event);
+      // A click that ends a drag is the end of a selection, not a request to
+      // go and look at the card.
+      if (id !== null) activate(id, selectedText() === "");
+    });
 
     pages.appendChild(box);
     pageEls[page.number] = box;
@@ -188,16 +233,6 @@ function render() {
       band.style.cssText = style;
       host.appendChild(band);
       bands.push(band);
-
-      // Only what has a card gets a hit target.  Everything keeps a band, so a
-      // cited passage can still be flashed, but hovering a table cell or a
-      // one-line caption used to highlight it and pair it with nothing.
-      if (!para.summarizable) return;
-      const hit = el("div", "hit");
-      hit.style.cssText = style;
-      hit.addEventListener("mouseenter", () => activate(para.id, false));
-      hit.addEventListener("click", () => activate(para.id, true));
-      host.appendChild(hit);
     });
     state.bands.set(para.id, bands);
   });
@@ -205,6 +240,7 @@ function render() {
   doc.paragraphs.filter((p) => p.summarizable).forEach((para) => {
     const card = el("div", "card pending");
     card.style.width = `${MARGIN_W}px`;
+    card.style.left = `${columns.at(para.anchor.page) - columns.base}px`;
     card.dataset.id = para.id;
 
     const section = el("span", "sec");
@@ -227,14 +263,49 @@ function render() {
     (state.bands.get(state.active) || []).forEach((b) => b.classList.add("on"));
   }
 
+  watchPages();
   requestAnimationFrame(() => layoutCards(pageEls));
   $("zoom-level").textContent = `${Math.round(zoom * 100)}%`;
+}
+
+/* Where the summary column starts, measured per page.
+ *
+ * Anchored to the edge of the paper, a card sits most of an inch of white
+ * beyond the last word it is describing -- and because every page is centred
+ * in the width of the widest one, a single oversized page (a landscape table,
+ * a wider figure page) shoves the cards of the whole document out to match it.
+ * So each page gets its own column, starting just past its own ink, and the
+ * cards settle on the middle one.  A page whose text reaches past that column
+ * moves its own cards right, far enough that a card never covers text.
+ */
+function cardColumns(widest) {
+  const { doc, zoom } = state;
+  const perPage = [];
+  doc.pages.forEach((page) => {
+    const ink = (page.content_right || page.width) * zoom;
+    perPage[page.number] = (widest - page.width * zoom) / 2 + ink + GAP;
+  });
+  const carded = [...new Set(doc.paragraphs.filter((p) => p.summarizable)
+                                           .map((p) => p.anchor.page))]
+    .map((number) => perPage[number])
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  const base = carded.length ? carded[Math.floor(carded.length / 2)] : widest + GAP;
+  return {
+    base,
+    right: Math.max(base, ...perPage.filter(Number.isFinite)),
+    at: (page) => Math.max(base, perPage[page] ?? base),
+  };
 }
 
 /* Stack cards down the margin: each one wants to sit level with its paragraph,
  * and is pushed down only as far as the card above it requires. */
 function layoutCards(pageEls) {
-  const { doc, zoom } = state;
+  const { doc, zoom, columns } = state;
+  if (!columns) return;
+  // Measured once: reading a page box's geometry inside the loop below would
+  // make the browser re-do layout for every card.
+  const spans = pageEls.map((box) => [box.offsetTop, box.offsetTop + box.offsetHeight]);
   let cursor = 0;
   doc.paragraphs.filter((p) => p.summarizable).forEach((para) => {
     const card = state.cards.get(para.id);
@@ -245,11 +316,187 @@ function layoutCards(pageEls) {
     const top = Math.max(wanted, cursor);
     card.style.top = `${top}px`;
     card.dataset.wanted = wanted;
-    cursor = top + card.offsetHeight + CARD_GAP;
+    const bottom = top + card.offsetHeight;
+    // A card pushed down the margin can come to rest beside a page wider than
+    // its own -- a landscape table -- so it takes that page's column as well.
+    let x = columns.at(para.anchor.page);
+    spans.forEach(([pageTop, pageBottom], number) => {
+      if (pageTop < bottom && top < pageBottom) x = Math.max(x, columns.at(number));
+    });
+    card.style.left = `${x - columns.base}px`;
+    cursor = bottom + CARD_GAP;
   });
   $("doc").style.minHeight = `${Math.max($("pages").offsetHeight, cursor)}px`;
   if (state.active !== null) drawLeader(state.active);
 }
+
+/* --- the text layer ------------------------------------------------------- */
+
+/* A page is a picture, so nothing on it can be selected.  A transparent copy of
+ * its words, laid over the image where the glyphs are, is what makes a passage
+ * selectable and copyable -- the trick a PDF in a browser has always used.  The
+ * words render invisibly; only the selection over them shows.
+ */
+
+const SERIF = '"Times New Roman", Times, serif';
+const SANS = "Helvetica, Arial, sans-serif";
+const MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
+
+let ruler = null;        // one canvas, reused: measuring spans in the document
+                         // would force a layout apiece, and a page holds a few
+                         // hundred of them
+
+function measure(font, text) {
+  ruler = ruler || document.createElement("canvas").getContext("2d");
+  ruler.font = font;
+  return ruler.measureText(text).width;
+}
+
+/* PyMuPDF's font flags as a CSS font -- 2 italic, 4 serifed, 8 monospaced,
+ * 16 bold.  The family only has to be close, since what it draws is invisible
+ * and the width is corrected below; but a near miss keeps that correction near
+ * 1, and a correction near 1 is what keeps a selection on its glyphs. */
+function fontOf(span, size) {
+  const family = span.flags & 8 ? MONO : span.flags & 4 ? SERIF : SANS;
+  return `${span.flags & 2 ? "italic " : ""}${span.flags & 16 ? "700 " : ""}` +
+         `${size}px ${family}`;
+}
+
+/* The paragraph whose rectangle holds a point on a page, in PDF points. */
+function enclosing(page, x, y, onlyCarded) {
+  for (const rect of state.rects.get(page) || []) {
+    if (onlyCarded && !rect.summarizable) continue;
+    const [x0, y0, x1, y1] = rect.bbox;
+    if (x >= x0 && x <= x1 && y >= y0 && y <= y1) return rect.id;
+  }
+  return null;
+}
+
+/* The same question asked of a mouse event over a page box. */
+function paraAt(page, box, event) {
+  const spot = box.getBoundingClientRect();
+  return enclosing(page, (event.clientX - spot.left) / state.zoom,
+                   (event.clientY - spot.top) / state.zoom, true);
+}
+
+const selectedText = () => (window.getSelection()?.toString() || "").trim();
+
+function fillText(layer) {
+  const number = Number(layer.dataset.page);
+  const spans = state.text.get(number);
+  if (!spans || layer.childElementCount) return;
+  const { zoom } = state;
+  const batch = document.createDocumentFragment();
+  spans.forEach((span) => {
+    const size = (span.y1 - span.y0) * zoom;
+    const font = fontOf(span, size);
+    const node = document.createElement("span");
+    node.textContent = span.text;
+    node.style.cssText = `left:${span.x0 * zoom}px;top:${span.y0 * zoom}px;` +
+                         `font:${font};line-height:1`;
+    const drawn = measure(font, span.text);
+    if (drawn > 0 && span.x1 > span.x0) {
+      node.style.transform = `scaleX(${(span.x1 - span.x0) * zoom / drawn})`;
+    }
+    // Which paragraph the span belongs to, and which line of the page it is
+    // on: between them, a selection can be put back together as prose.
+    const owner = enclosing(number, (span.x0 + span.x1) / 2,
+                            (span.y0 + span.y1) / 2, false);
+    if (owner !== null) node.dataset.para = owner;
+    node.dataset.line = span.line;
+    batch.appendChild(node);
+  });
+  layer.appendChild(batch);
+}
+
+async function loadText(layer) {
+  const number = Number(layer.dataset.page);
+  if (!state.text.has(number)) {
+    const sha = state.sha;
+    try {
+      const data = await fetch(`/api/text/${sha}/${number}.json`)
+        .then((r) => r.json());
+      if (state.sha !== sha) return;    // the reader moved on to another paper
+      state.text.set(number, data.spans || []);
+    } catch {
+      return;               // the page is still readable, just not selectable
+    }
+  }
+  fillText(layer);
+}
+
+/* Fill a page's text layer as it comes near, the way its image is loaded: a
+ * reader who opens a 200-page report and reads four pages pays for four.  The
+ * spans stay in state.text, so zooming -- which rebuilds every layer -- costs
+ * nothing over the network. */
+function watchPages() {
+  state.watcher?.disconnect();
+  state.watcher = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      state.watcher.unobserve(entry.target);
+      loadText(entry.target);
+    });
+  }, { rootMargin: "600px" });
+  document.querySelectorAll(".text-layer")
+          .forEach((layer) => state.watcher.observe(layer));
+}
+
+/* --- copying -------------------------------------------------------------- */
+
+/* Put back together what a selection covers.
+ *
+ * Every line of the page is its own element, so the browser's own copy hands
+ * over a column of fragments with the typesetter's hyphens still in them.  Each
+ * span carries the paragraph and the line it came from, which is enough to
+ * rebuild the sentences the way the extractor does in _join -- so a quote
+ * pasted into notes reads as prose, and reads the same as the text Gloss sent
+ * the model.  Anything outside a paragraph -- a heading, a table row -- keeps
+ * its line breaks, because running a table row together would be nonsense.
+ */
+function knit(fragment) {
+  let out = "";
+  let para = null;
+  let line = null;
+  fragment.querySelectorAll("[data-line]").forEach((span) => {
+    const text = span.textContent;
+    if (!text) return;
+    const owner = span.dataset.para ?? "";
+    if (para === null) out = text;
+    else if (owner !== para) out = `${out.trimEnd()}\n\n${text}`;
+    else if (span.dataset.line === line) out += text;
+    else if (owner === "") out = `${out.trimEnd()}\n${text}`;
+    else out = mend(out, text);
+    para = owner;
+    line = span.dataset.line;
+  });
+  return out.replace(/[^\S\n]+/g, " ").trim();
+}
+
+/* One line onto the end of the last, healing a word the typesetter broke. */
+function mend(out, text) {
+  const before = out.trimEnd();
+  const after = text.trimStart();
+  if (/[-\u00ad]$/.test(before) && !before.endsWith("--") && /^\p{Ll}/u.test(after)) {
+    return before.slice(0, -1) + after;     // word split across two lines
+  }
+  if (before.endsWith("\u2013") && /^\p{Ll}/u.test(after)) {
+    return before + after;                  // compound broken at an en dash
+  }
+  return `${before} ${after}`;
+}
+
+document.addEventListener("copy", (event) => {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+  const text = knit(selection.getRangeAt(0).cloneContents());
+  // Nothing of the page in the selection: a summary card, an answer, or a few
+  // words within one line -- all of which the browser already copies as they
+  // read.
+  if (!text) return;
+  event.clipboardData.setData("text/plain", text);
+  event.preventDefault();
+});
 
 /* --- interaction ---------------------------------------------------------- */
 
@@ -274,7 +521,7 @@ function drawLeader(id) {
   svg.innerHTML = "";
   const card = state.cards.get(id);
   if (!card || !state.showMargin) return;
-  const para = state.doc.paragraphs.find((p) => p.id === id);
+  const para = paragraph(id);
   const bands = state.bands.get(id);
   if (!para || !bands || !bands.length) return;
 
@@ -390,12 +637,17 @@ function openAsk(open) {
 /* Scroll a cited paragraph into view and flash it, so a citation in the answer
  * lands the reader on the actual passage rather than just naming it. */
 function jumpTo(id) {
-  const para = state.doc?.paragraphs.find((p) => p.id === id);
+  const para = paragraph(id);
   const bands = state.bands.get(id);
   if (!para || !bands || !bands.length) return;
   activate(id, false);
   bands[0].scrollIntoView({ block: "center", behavior: "smooth" });
-  bands.forEach((band) => {
+  flash(id);
+}
+
+/* Say that a passage is the one meant, without moving anything. */
+function flash(id) {
+  (state.bands.get(id) || []).forEach((band) => {
     band.classList.remove("flash");
     void band.offsetWidth;              // restart the animation
     band.classList.add("flash");
@@ -498,8 +750,8 @@ $("toggle-margin").addEventListener("click", (event) => {
   state.showMargin = !state.showMargin;
   $("doc").classList.toggle("no-margin", !state.showMargin);
   event.currentTarget.setAttribute("aria-pressed", String(state.showMargin));
-  const widest = Math.max(...(state.doc?.pages || [{ width: 600 }]).map((p) => p.width)) * state.zoom;
-  $("doc").style.width = state.showMargin ? `${widest + GAP + MARGIN_W}px` : `${widest}px`;
+  const widths = state.widths;
+  $("doc").style.width = `${state.showMargin ? widths.doc : widths.pages}px`;
 });
 // Delegated, because entries are added to this list as documents are opened.
 $("recent-list").addEventListener("click", (event) => {
@@ -522,6 +774,17 @@ document.addEventListener("keydown", (event) => {
   if (event.target.tagName === "TEXTAREA" || event.target.tagName === "INPUT") return;
   if (event.key === "=" || event.key === "+") setZoom(state.zoom + 0.1);
   if (event.key === "-") setZoom(state.zoom - 0.1);
+  // With nothing selected, copy the paragraph under the pointer whole -- the
+  // joined, dehyphenated text, not the lines it happens to be set in.
+  if ((event.metaKey || event.ctrlKey) && event.key === "c"
+      && state.active !== null && selectedText() === "") {
+    const para = paragraph(state.active);
+    if (para) {
+      navigator.clipboard.writeText(para.text);
+      flash(state.active);
+      event.preventDefault();
+    }
+  }
 });
 
 /* Browsers withhold the real path of a dragged file, so send the bytes. */

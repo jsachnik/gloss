@@ -33,7 +33,7 @@ import summarize
 # The one place the version is written down.  It reaches the opening screen,
 # the /api/health probe below, and the startup banner from here; what changed in
 # each version is recorded in CHANGELOG.md.
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 CACHE_DIR = Path.home() / ".cache" / "gloss"
 PAGE_DIR = CACHE_DIR / "pages"
@@ -249,6 +249,22 @@ def page_image(sha, number):
             pixmap.save(target)
     return Response(target.read_bytes(), mimetype="image/png",
                     headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.route("/api/text/<sha>/<int:number>.json")
+def page_text(sha, number):
+    """Where every word on a page sits, for the reader's invisible text layer.
+
+    The page itself is an image, so this is what makes it selectable.  Fetched
+    a page at a time, as the images are: a reader who opens a 200-page report
+    and reads four of them should pay for four.
+    """
+    entry = _entry(sha)
+    with pymupdf.open(entry["path"]) as pdf:
+        if number < 0 or number >= pdf.page_count:
+            abort(404)
+        spans = extract.page_spans(pdf[number])
+    return jsonify({"page": number, "spans": spans})
 
 
 @app.route("/api/summaries/<sha>")

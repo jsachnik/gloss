@@ -151,9 +151,6 @@ body:not(.reading) .bar { display: none; }
   font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums;
 }
 
-/* Transparent hit target over each paragraph. */
-.hit { position: absolute; cursor: pointer; border-radius: 3px; }
-.hit:hover { background: color-mix(in srgb, var(--highlight) 55%, transparent); }
 .band {
   position: absolute; pointer-events: none; border-radius: 3px;
   background: var(--highlight);
@@ -161,6 +158,21 @@ body:not(.reading) .bar { display: none; }
   opacity: 0; transition: opacity 0.12s ease;
 }
 .band.on { opacity: 1; }
+
+/* An invisible copy of the page's own text, laid over the image at the
+   coordinates the glyphs occupy, so a passage can be selected and copied.  It
+   sits above the highlight bands -- they are painted, it is read. */
+.text-layer { position: absolute; inset: 0; z-index: 2; overflow: hidden; }
+.text-layer span {
+  position: absolute; white-space: pre; cursor: text;
+  color: transparent; transform-origin: 0 0;
+}
+/* Selected text stays invisible: the page image underneath is what the reader
+   is looking at, and a second set of glyphs over it would be a blur. */
+.text-layer span::selection {
+  color: transparent;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
 
 /* --- margin --------------------------------------------------------------- */
 

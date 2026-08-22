@@ -99,6 +99,7 @@ _STOP_RE = re.compile(
     r"^\s*(references|bibliography|works cited|literature cited|"
     r"acknowledge?ments?|supporting information)\s*$", re.I)
 _LINENUM_RE = re.compile(r"\s+\d{1,4}\s*$")
+_COUNTER_RE = re.compile(r"^\d{1,4}$")
 _SENT_END_RE = re.compile(r"[.!?][\"'’”)\]]*\s*$")
 
 
@@ -333,6 +334,97 @@ def _strip_line_numbers(lines) -> None:
             continue
         for line in hits:
             line.text = _LINENUM_RE.sub("", line.text)
+
+
+def _line_number_spans(spans) -> set:
+    """Which spans are a manuscript's line counter rather than its text.
+
+    `_strip_line_numbers` above takes the counter off a line of prose, where it
+    arrives welded to the end of the text.  The reader's text layer works in
+    spans, where the counter is a span of its own, and a reader dragging across
+    a paragraph should not come away with 24, 25, 26 threaded through the quote.
+
+    Two things together identify them, and neither would do alone: they share a
+    right edge, and they count.  A column of figures in a table shares an edge
+    too, which is why the run of consecutive integers is what decides.
+    """
+    digits = [s for s in spans if _COUNTER_RE.match(s["text"].strip())]
+    if len(digits) < 5:
+        return set()
+    digits.sort(key=lambda s: s["x1"])
+    columns, run = [], [digits[0]]
+    for span in digits[1:]:
+        if span["x1"] - run[-1]["x1"] <= 2.0:
+            run.append(span)
+        else:
+            columns.append(run)
+            run = [span]
+    columns.append(run)
+
+    drop = set()
+    for column in columns:
+        if len(column) < 5:
+            continue
+        column.sort(key=lambda s: s["y0"])
+        values = [int(s["text"].strip()) for s in column]
+        steps = [b - a for a, b in zip(values, values[1:])]
+        if sum(1 for step in steps if step == 1) >= 0.8 * len(steps):
+            drop.update(id(s) for s in column)
+    return drop
+
+
+def page_spans(page) -> list:
+    """Every horizontal text span on a page, positioned, in PDF points.
+
+    This is what the reader lays over the page image, transparently, so that
+    text can be selected and copied: the image carries the appearance and these
+    carry the words.  Spans rather than lines, because a span is a run set in
+    one font, and a font is what a width can be matched against.
+
+    They come out in reading order, and on a two-column page that is not the
+    order the PDF stores them in.  Sorting by column and then by y -- the key
+    `extract` sorts paragraphs by, from the same `_segment` -- is what keeps a
+    selection dragged down one column from coming back interleaved with the
+    other.  `line` numbers the lines within the page, so the reader can tell a
+    span that continues a line from one that starts the next.
+    """
+    held = {}
+    for block in page.get_text("dict")["blocks"]:
+        if block["type"]:
+            continue
+        for line in block["lines"]:
+            held[tuple(round(v, 2) for v in line["bbox"])] = line["spans"]
+
+    # _raw_lines has already dropped what should not be selectable: rotated
+    # running heads, and text that turns out to be part of a figure.
+    lines = _raw_lines(page)
+    columns = _segment(lines, page.rect.width) if lines else []
+    order = {}
+    for index, column in enumerate(columns):
+        for line in column:
+            order[id(line)] = (index, round(line.y0, 1), line.x0)
+    lines.sort(key=lambda l: order.get(id(l),
+                                       (len(columns), round(l.y0, 1), l.x0)))
+
+    spans, number = [], 0
+    for line in lines:
+        started = len(spans)
+        for span in held.get(tuple(round(v, 2) for v in line.bbox), ()):
+            # Whitespace between two spans is a span of its own, and it is the
+            # only thing holding two words apart -- dropping it welds
+            # "extremes." to "Unlike" in anything copied.  A tab is squared off
+            # to a space: the browser advances it to its own tab stop, which no
+            # measurement of the PDF's width can predict.
+            if not span["text"]:
+                continue
+            x0, y0, x1, y1 = (round(v, 2) for v in span["bbox"])
+            spans.append({"text": span["text"].replace("\t", " "),
+                          "x0": x0, "y0": y0, "x1": x1, "y1": y1,
+                          "flags": span["flags"], "line": number})
+        if len(spans) > started:
+            number += 1
+    drop = _line_number_spans(spans)
+    return [s for s in spans if id(s) not in drop]
 
 
 def _attach_drop_caps(lines, caps) -> None:
@@ -668,6 +760,26 @@ def _merge_rects(lines):
     return rects
 
 
+def _content_right(page) -> float:
+    """The x of the rightmost thing drawn on a page, in PDF points.
+
+    The summary margin is placed against this rather than against the edge of
+    the paper.  A journal page carries most of an inch of white on the right,
+    and a card parked beyond it sits a long way from the sentence it explains.
+
+    Text and image blocks are what a reader sees, so they are what is measured;
+    loose vector art is rare at the outer edge and expensive to walk.  A page
+    with nothing on it falls back to its own width, which keeps the margin where
+    it was.
+    """
+    right = 0.0
+    for block in page.get_text("dict")["blocks"]:
+        x1 = block["bbox"][2]
+        if x1 <= page.rect.width + 1:      # ignore anything hanging off-page
+            right = max(right, x1)
+    return right or page.rect.width
+
+
 # --- top level --------------------------------------------------------------
 
 def extract(path: str) -> dict:
@@ -683,7 +795,8 @@ def extract(path: str) -> dict:
         raise NoTextLayer("This PDF has no selectable text (likely scanned).")
     body, largest = min(sizes), max(sizes)
 
-    pages = [{"number": p.number, "width": p.rect.width, "height": p.rect.height}
+    pages = [{"number": p.number, "width": p.rect.width, "height": p.rect.height,
+              "content_right": _content_right(p)}
              for p in doc]
 
     all_lines, heading_lines, drop_caps = [], [], []
