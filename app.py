@@ -24,16 +24,19 @@ import webbrowser
 from pathlib import Path
 
 import pymupdf
-from flask import Flask, Response, abort, jsonify, render_template, request
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request
 
 import extract
 import llm
 import summarize
+from library import db as library_db
+from library import routes as library_routes
+from library import summarizer as library_summarizer
 
 # The one place the version is written down.  It reaches the opening screen,
 # the /api/health probe below, and the startup banner from here; what changed in
 # each version is recorded in CHANGELOG.md.
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 CACHE_DIR = Path.home() / ".cache" / "gloss"
 PAGE_DIR = CACHE_DIR / "pages"
@@ -44,6 +47,8 @@ MAX_RECENTS = 5
 PORTS = (5017, 5018, 5019)   # bound in order; also where a running copy is sought
 
 app = Flask(__name__)
+app.register_blueprint(library_routes.bp)
+library_db.init()
 
 # sha -> everything known about one open document.  Single-user local app, so a
 # dict behind a lock is the whole state layer.
@@ -73,6 +78,11 @@ def _remember(path: str, title: str) -> None:
 
 
 def _title_for(path: str, doc: dict) -> str:
+    # A paper in the library has a real title; fall back to the file name.
+    row = library_db.connect().execute(
+        "SELECT title FROM papers WHERE pdf_path=?", (path,)).fetchone()
+    if row and row["title"]:
+        return row["title"]
     return os.path.splitext(os.path.basename(path))[0]
 
 
@@ -151,6 +161,22 @@ def _entry(sha: str) -> dict:
 # --- routes -----------------------------------------------------------------
 
 @app.route("/")
+def root():
+    return redirect("/home")
+
+
+@app.route("/api/open-sha", methods=["POST"])
+def open_sha():
+    """Open a library paper in the reader by its hash."""
+    sha = (request.json or {}).get("sha", "")
+    row = library_db.connect().execute(
+        "SELECT pdf_path FROM papers WHERE sha=?", (sha,)).fetchone()
+    if not row:
+        return jsonify({"error": "That paper is not in the library."}), 404
+    return _ingest(row["pdf_path"])
+
+
+@app.route("/read")
 def index():
     warning = summarize.check_ready()
     provider = ""
@@ -181,11 +207,18 @@ def pick():
     A local app should feel like a Mac app; osascript gives a real Finder dialog
     without bundling one.  Drag-and-drop (below) is the fallback everywhere else.
     """
-    script = ('POSIX path of (choose file with prompt "Choose a PDF" '
-              'of type {"com.adobe.pdf", "pdf"})')
+    if os.name == "nt":
+        ps = ("Add-Type -AssemblyName System.Windows.Forms; "
+              "$f = New-Object System.Windows.Forms.OpenFileDialog; "
+              "$f.Filter = 'PDF files (*.pdf)|*.pdf'; $f.Title = 'Choose a PDF'; "
+              "if ($f.ShowDialog() -eq 'OK') { $f.FileName } else { exit 1 }")
+        cmd = ["powershell", "-NoProfile", "-STA", "-Command", ps]
+    else:
+        script = ('POSIX path of (choose file with prompt "Choose a PDF" '
+                  'of type {"com.adobe.pdf", "pdf"})')
+        cmd = ["osascript", "-e", script]
     try:
-        result = subprocess.run(["osascript", "-e", script],
-                                capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     except (OSError, subprocess.TimeoutExpired):
         return jsonify({"error": "Could not open the file chooser."}), 500
     if result.returncode != 0:
@@ -317,6 +350,7 @@ def ask():
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:                                # noqa: BLE001
         return jsonify({"error": f"Could not answer that: {exc}"}), 500
+    library_routes.save_qa(body["sha"], question, answer, cited)
     return jsonify({"question": question, "answer": answer, "cited": cited})
 
 
@@ -407,5 +441,8 @@ if __name__ == "__main__":
             print(f"  Using {llm.settings().describe()}")
         except Exception:                                   # noqa: BLE001
             pass
+    queued = library_summarizer.enqueue_missing()
+    if queued:
+        print(f"  Library: summarizing {queued} paper(s) in the background.")
     threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     app.run(host="127.0.0.1", port=port, threaded=True, debug=False)

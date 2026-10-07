@@ -84,6 +84,24 @@ async function openResult(result) {
   thread.appendChild(hint);
   render();
   poll();
+  loadHistory(result.sha);
+}
+
+/* Questions asked about this paper in earlier sessions, saved by the server. */
+async function loadHistory(sha) {
+  try {
+    const data = await fetch(`/api/qa/${sha}`).then((r) => r.json());
+    if (state.sha !== sha || !data.qa || !data.qa.length) return;
+    const thread = $("ask-thread");
+    thread.querySelector(".ask-empty")?.remove();
+    data.qa.forEach((item) => {
+      const q = el("p", "ask-q");
+      q.textContent = item.question;
+      const a = el("div", "ask-a");
+      renderAnswer(a, item.answer);
+      thread.append(q, a);
+    });
+  } catch (err) { /* history is a convenience; the reader works without it */ }
 }
 
 /* Back to the screen the app starts on. Everything tied to the open document
@@ -742,7 +760,8 @@ function setZoom(next) {
   if (state.doc) render();
 }
 
-$("close").addEventListener("click", closeDoc);
+// Closing a paper returns to the Library home.
+$("close").addEventListener("click", () => { window.location.href = "/home"; });
 $("open2")?.addEventListener("click", choose);
 $("zoom-in").addEventListener("click", () => setZoom(state.zoom + 0.1));
 $("zoom-out").addEventListener("click", () => setZoom(state.zoom - 0.1));
@@ -805,6 +824,10 @@ window.addEventListener("drop", guard(async (event) => {
   form.append("file", file);
   openResult(await post("/api/upload", form, true));
 }));
+
+/* Arriving from the Library home: /read?open=<sha> opens that paper at once. */
+const wanted = new URLSearchParams(window.location.search).get("open");
+if (wanted) guard(async () => openResult(await post("/api/open-sha", { sha: wanted })))();
 
 window.addEventListener("resize", () => {
   if (state.doc) requestAnimationFrame(() => layoutCards(collectPageEls()));

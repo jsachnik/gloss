@@ -64,6 +64,25 @@ window running while you read.
 - Reopening a paper you've read before is instant — summaries are cached in
   `~/.cache/gloss/` by file hash.
 
+## Library
+
+Gloss also keeps a **library**. Start the app and it opens at `/home`: add PDFs
+(button or drag-and-drop), and each is read, summarized once, and remembered --
+along with every question you ask about it. From there:
+
+- **Map** -- how your papers connect, as articles or as authors. Click a node
+  for its summary (or an author's papers); click through to the PDF with its
+  margin notes.
+- **Timeline** -- the same papers by year.
+- **Librarian** -- ask what to read. It recommends only papers in your library,
+  says so when the library cannot answer, and highlights the papers it used in
+  blue across the list, map and timeline.
+
+Papers live in `~/Gloss Library` unless `GLOSS_LIBRARY` (environment or `.env`) says otherwise;
+the database (`gloss.db`) sits beside them and is never committed. On Windows,
+`run.bat` starts everything. The design is written up in
+[docs/LIBRARY_DESIGN.md](docs/LIBRARY_DESIGN.md).
+
 ## How it works
 
 | File | Role |

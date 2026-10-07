@@ -13,6 +13,33 @@ how to restart.
 Versions are `major.minor.patch` — the patch number moves for fixes, the minor
 for refinements, the major for a change in how the reader itself works.
 
+## 1.2.0 — 2026-10-07
+
+- **A local library.** Papers are kept in a folder you choose (default
+  `~/Gloss Library`; set `GLOSS_LIBRARY` to change it). Adding a PDF reads its
+  title, authors, year, venue and DOI from the first pages, summarizes it once
+  with the existing two-pass pipeline, and stores everything -- including every
+  question you ask about it -- in a SQLite file beside the PDFs. Byte-identical
+  and same-DOI/same-title copies are detected and left out.
+- **Home** at `/home` replaces the opening screen: the library list, a **Map**
+  of how papers connect (Articles or Authors), a **Timeline** by year, and
+  a **Librarian** to ask what to read. The reader moved to `/read`; **Close**
+  returns Home, and a paper's earlier questions reload when it is reopened.
+- **Connections without embeddings.** Shared authors, citations (one paper's
+  reference list naming another's title or DOI), shared topic words, and one
+  batched model judgement per new paper over its best few candidates -- so the
+  cost of adding a paper does not grow with the library. No line means no
+  connection was found, and papers with none are marked.
+- **The Librarian only recommends papers you have.** Answers are per-paper
+  (what it asks, what it finds), then what they show together and what stays
+  open. Any paper id the model invents is dropped by the server, and when the
+  library cannot answer it says so and offers clearly-labelled unverified leads.
+  The papers an answer uses are highlighted in blue in the list, map and
+  timeline, with footnote numbers that jump to them.
+- **Windows.** `run.bat` starts the app; the file chooser uses the Windows
+  dialog. Background summarizing runs two requests at a time and waits out
+  rate limits instead of failing the paper.
+
 ## 1.1.0 — 2026-08-22
 
 - **The text on a page can now be selected and copied.** A page is a picture,

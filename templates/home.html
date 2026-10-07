@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gloss Library</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="stylesheet" href="/static/reader.css">
+<link rel="stylesheet" href="/static/home.css">
+</head>
+<body class="home">
+
+<header class="bar">
+  <div class="bar-left">
+    <strong class="brand">Gloss Library</strong>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="library" role="tab">Library</button>
+      <button class="tab" data-view="map" role="tab">Map</button>
+      <button class="tab" data-view="timeline" role="tab">Timeline</button>
+    </nav>
+  </div>
+  <div class="bar-right">
+    <span id="summary-status" class="status"></span>
+    <button id="add" class="btn primary">Add PDF</button>
+    <input id="file" type="file" accept="application/pdf" multiple hidden>
+  </div>
+</header>
+
+<div class="shell">
+  <aside class="librarian" aria-label="Librarian">
+    <h2>Librarian</h2>
+    <p class="hint">Ask what to read. It only recommends papers you actually have,
+       and says so when the library can't answer.</p>
+    <div id="chat" class="chat"></div>
+    <form id="chat-form" class="chat-form">
+      <textarea id="chat-input" rows="2"
+                placeholder="Which of my papers cover aerosol effects on ENSO?"></textarea>
+      <button class="btn primary" id="chat-send" type="submit">Ask</button>
+    </form>
+  </aside>
+
+  <main class="stage">
+    <div id="notice" class="notice" hidden></div>
+    <div id="hl-bar" class="hl-bar" hidden></div>
+
+    <section id="view-library" class="view">
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Search title, author, keyword...">
+        <span id="count" class="muted"></span>
+      </div>
+      <ul id="paper-list" class="paper-list"></ul>
+    </section>
+
+    <section id="view-map" class="view" hidden>
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Node type">
+          <button class="seg-btn active" data-mode="article">Articles</button>
+          <button class="seg-btn" data-mode="author">Authors</button>
+        </div>
+        <div id="legend" class="legend"></div>
+      </div>
+      <div class="canvas-wrap"><canvas id="graph"></canvas>
+        <div id="tip" class="tip" hidden></div></div>
+    </section>
+
+    <section id="view-timeline" class="view" hidden>
+      <div id="timeline" class="timeline"></div>
+    </section>
+  </main>
+
+  <aside id="detail" class="detail" hidden aria-label="Details">
+    <button id="detail-close" class="btn icon" title="Close">&times;</button>
+    <div id="detail-body"></div>
+  </aside>
+</div>
+
+<div id="drop" class="drop" hidden><div>Drop PDFs to add them to your library</div></div>
+<script src="/static/home.js"></script>
+</body>
+</html>

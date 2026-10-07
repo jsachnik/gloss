@@ -7,3 +7,6 @@ __pycache__/
 
 # Kept local, not published.
 tests/
+
+# A library's database lives beside its PDFs, never in the repo.
+*.db

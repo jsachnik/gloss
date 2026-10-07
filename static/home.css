@@ -1,0 +1,121 @@
+/* Gloss Library home. Shares the reader's palette (reader.css). */
+
+body.home { overflow: hidden; }
+body.home .bar { display: flex; }
+.brand { color: var(--accent); margin-right: 18px; }
+.tabs { display: inline-flex; gap: 4px; }
+.tab { background: none; border: 0; padding: 6px 12px; border-radius: 6px; color: var(--ink-soft);
+       font: inherit; cursor: pointer; }
+.tab:hover { background: var(--accent-soft); }
+.tab.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+
+.shell { display: flex; height: calc(100vh - var(--bar-h)); }
+.librarian { width: 340px; flex: none; border-right: 1px solid var(--line); background: var(--panel);
+             display: flex; flex-direction: column; padding: 14px; min-height: 0; }
+.librarian h2 { margin: 0 0 4px; font-size: 16px; }
+.hint, .muted { color: var(--ink-soft); font-size: 13px; }
+.chat { flex: 1; overflow-y: auto; margin: 10px 0; display: flex; flex-direction: column; gap: 12px; }
+.chat-form { display: flex; gap: 8px; align-items: flex-end; }
+.chat-form textarea { flex: 1; resize: none; font: inherit; padding: 8px; border-radius: 8px;
+                      border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+
+.msg-q { align-self: flex-end; background: var(--accent-soft); padding: 8px 12px; border-radius: 12px;
+         max-width: 92%; }
+.msg-a { font-size: 14px; }
+.msg-a .reads { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.reads button { width: 100%; text-align: left; background: var(--bg); border: 1px solid var(--line);
+                border-radius: 8px; padding: 8px 10px; cursor: pointer; font: inherit; color: var(--ink); }
+.reads button:hover { border-color: var(--accent); }
+.reads .t { font-weight: 600; display: block; }
+.reads .why { color: var(--ink-soft); font-size: 13px; }
+.gap { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #fff3cd; color: #5b4500;
+       font-size: 13px; }
+@media (prefers-color-scheme: dark) { .gap { background: #4a3d12; color: #f1dca0; } }
+.ext { margin-top: 8px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px;
+       font-size: 13px; color: var(--ink-soft); }
+.ext h4 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.ext ul { margin: 0; padding-left: 18px; }
+
+.stage { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.view { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 18px; }
+.toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
+#search { flex: 1; max-width: 420px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+          background: var(--panel); color: var(--ink); font: inherit; }
+.notice { margin: 10px 18px 0; padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); }
+
+.paper-list { flex: 1; min-height: 0; list-style: none; margin: 0; padding: 0; overflow-y: auto; display: grid; gap: 10px;
+              grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-content: start; }
+.pcard { flex: none; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+        box-shadow: var(--shadow); cursor: pointer; }
+.pcard:hover { border-color: var(--accent); }
+.pcard h3 { margin: 0 0 4px; font-size: 15px; font-weight: 600; line-height: 1.3; font-family: inherit; color: var(--ink); border: 0; padding: 0; }
+.pcard .meta { font-size: 13px; color: var(--ink-soft); }
+.chip { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px;
+        background: var(--accent-soft); color: var(--accent); margin: 6px 4px 0 0; }
+.chip.dim { background: var(--bg); color: var(--ink-soft); border: 1px solid var(--line); }
+
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg-btn { background: var(--panel); border: 0; padding: 6px 14px; cursor: pointer; font: inherit; color: var(--ink); }
+.seg-btn.active { background: var(--accent); color: #fff; }
+.legend { display: flex; gap: 12px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
+.legend label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+.legend i { width: 18px; height: 3px; display: inline-block; border-radius: 2px; }
+.canvas-wrap { flex: 1; min-height: 0; position: relative; border: 1px solid var(--line); border-radius: 10px;
+               background: var(--panel); overflow: hidden; }
+#graph { width: 100%; height: 100%; display: block; cursor: grab; }
+.tip { position: absolute; pointer-events: none; max-width: 320px; background: var(--ink); color: var(--bg);
+       padding: 6px 9px; border-radius: 6px; font-size: 12px; }
+
+.timeline { flex: 1; overflow: auto; display: flex; gap: 14px; align-items: flex-start; padding-bottom: 12px; }
+.year-col { flex: none; width: 250px; }
+.year-col > h3 { margin: 0 0 8px; padding-bottom: 6px; border-bottom: 2px solid var(--accent);
+               color: var(--accent); font-size: 18px; }
+.year-col .pcard { margin-bottom: 8px; }
+
+.detail { width: 380px; flex: none; border-left: 1px solid var(--line); background: var(--panel);
+          overflow-y: auto; padding: 16px; position: relative; }
+.detail #detail-close { position: absolute; top: 8px; right: 8px; }
+.detail h2 { margin: 0 24px 6px 0; font-size: 18px; line-height: 1.3; }
+.detail h4 { margin: 16px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+             color: var(--ink-soft); }
+.detail p { margin: 0 0 8px; }
+.linklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.linklist button { width: 100%; text-align: left; background: var(--bg); border: 1px solid var(--line);
+                   border-radius: 8px; padding: 7px 10px; cursor: pointer; font: inherit; color: var(--ink); }
+.linklist button:hover { border-color: var(--accent); }
+.linklist .sub { display: block; font-size: 12px; color: var(--ink-soft); }
+a.author { color: var(--accent); cursor: pointer; text-decoration: underline dotted; }
+
+/* --- Librarian: highlights and structured answers ---------------------------- */
+:root { --hl: #2f7bf5; --hl-soft: #e6f0ff; }
+@media (prefers-color-scheme: dark) { :root { --hl: #6aa5ff; --hl-soft: #1c2b44; } }
+
+.pcard { position: relative; transition: opacity .2s, box-shadow .2s; }
+body.has-hl .pcard:not(.hl) { opacity: .5; }
+.pcard.hl { border-color: var(--hl); background: var(--hl-soft); box-shadow: 0 0 0 2px var(--hl); }
+.fn-badge { position: absolute; top: -9px; right: -9px; min-width: 22px; height: 22px; border-radius: 11px;
+            background: var(--hl); color: #fff; font-size: 12px; font-weight: 700; display: grid;
+            place-items: center; padding: 0 5px; }
+.pcard.pulse { animation: pulse 1.6s ease-out; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--hl); } 40% { box-shadow: 0 0 0 10px rgba(47,123,245,.35); }
+                   100% { box-shadow: 0 0 0 2px var(--hl); } }
+
+.hl-bar { margin: 10px 18px 0; padding: 7px 12px; border-radius: 8px; background: var(--hl-soft);
+          color: var(--hl); font-size: 13px; border: 1px solid var(--hl); }
+.link { background: none; border: 0; color: var(--hl); text-decoration: underline; cursor: pointer; font: inherit; }
+
+.msg-a .lead { margin: 0 0 8px; }
+.ans-paper { margin: 10px 0; }
+.ans-title { display: flex; gap: 8px; align-items: flex-start; font-weight: 600; font-size: 14px; }
+.fn { flex: none; min-width: 22px; height: 22px; border-radius: 11px; border: 0; background: var(--hl);
+      color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; padding: 0 6px; }
+.fn:hover { filter: brightness(1.15); }
+.ans-list { margin: 4px 0 0 30px; padding: 0; font-size: 13.5px; }
+.ans-list li { margin-bottom: 3px; }
+.ans-h { margin: 14px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+         color: var(--ink-soft); }
+
+/* room for the footnote badge that overhangs a card's corner */
+.paper-list { padding: 12px 12px 12px 4px; }
+.timeline { padding-top: 12px; }
+.year-col { padding-right: 10px; }
