@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import tempfile
 import threading
 from pathlib import Path
 
+from pathlib import Path
+
 from flask import Blueprint, jsonify, render_template, request
+
+import summarize
 
 from . import db, edges, ingest, librarian, summarizer
 
@@ -45,7 +51,10 @@ def library():
     dups = conn.execute("SELECT COUNT(*) FROM papers WHERE duplicate_of IS NOT NULL").fetchone()[0]
     connected = {r[0] for r in conn.execute("SELECT a FROM edges UNION SELECT b FROM edges")}
     papers = [dict(_paper_row(r, authors), connected=r["sha"] in connected) for r in rows]
-    return jsonify({"papers": papers, "duplicates": dups, "folder": str(db.library_dir())})
+    known = {r[0] for r in conn.execute("SELECT pdf_path FROM papers")}
+    unscanned = sum(1 for p in ingest.list_pdfs() if str(p) not in known)
+    return jsonify({"papers": papers, "duplicates": dups, "folder": str(db.library_dir()),
+                    "unscanned": unscanned})
 
 
 @bp.route("/api/paper/<sha>")
@@ -184,30 +193,69 @@ def scan():
     _process_new(holder)
     r = holder["report"]
     return jsonify({"added": len(r["added"]), "duplicates": [d[0] for d in r["duplicates"]],
-                    "same_file": r["same_file"], "errors": r["errors"]})
+                    "same_file": r["same_file"],
+                    "errors": [(n, _friendly(e)) for n, e in r["errors"]]})
+
+
+def _friendly(err: str) -> str:
+    low = err.lower()
+    if "429" in low or "ratelimit" in low or "rate limit" in low:
+        return ("the AI service is busy or your TAMU AI allowance is used up. The PDF is "
+                "saved in your library folder and will be read the next time Gloss starts.")
+    return err
 
 
 @bp.route("/api/library/upload", methods=["POST"])
 def upload():
+    """Add one PDF. The verdict is about THIS file, not whatever else a scan found."""
     handle = request.files.get("file")
     if not handle or not handle.filename.lower().endswith(".pdf"):
         return jsonify({"error": "Please choose a PDF file."}), 400
-    target = db.library_dir() / os.path.basename(handle.filename)
-    stem, n = target.stem, 1
-    while target.exists():                       # never overwrite a different paper
-        n += 1
-        target = target.with_name(f"{stem} ({n}).pdf")
-    handle.save(target)
-    holder: dict = {}
-    _process_new(holder)
-    r = holder["report"]
-    if r["errors"]:
-        return jsonify({"error": f"Could not read {target.name}: {r['errors'][0][1]}"}), 422
-    if r["same_file"] or r["duplicates"]:
-        target.unlink(missing_ok=True)           # a repeat adds nothing; keep the folder clean
-        return jsonify({"duplicate": True,
-                        "message": "That paper is already in your library."})
-    return jsonify({"added": len(r["added"])})
+
+    name = os.path.basename(handle.filename)
+    scratch = Path(tempfile.mkdtemp(prefix="gloss-upload-"))
+    try:
+        incoming = scratch / name
+        handle.save(incoming)
+        sha = summarize.sha_of(str(incoming))
+        conn = db.connect()
+        have = conn.execute("SELECT title, duplicate_of FROM papers WHERE sha=?", (sha,)).fetchone()
+        if have:
+            return jsonify({"duplicate": True,
+                            "message": f"Already in your library: {have['title']}"})
+
+        # The same bytes may already sit in the folder, dropped in by hand and not
+        # read yet. Then there is nothing to copy -- reading the folder picks it up.
+        twin = next((p for p in ingest.list_pdfs() if summarize.sha_of(str(p)) == sha), None)
+        saved = None
+        if twin is None:
+            saved = db.library_dir() / name
+            n = 1
+            while saved.exists():                        # never overwrite a different paper
+                n += 1
+                saved = saved.with_name(f"{Path(name).stem} ({n}).pdf")
+            shutil.move(str(incoming), saved)
+        subject = str(twin or saved)
+
+        holder: dict = {}
+        _process_new(holder)
+        r = holder["report"]
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+    mine = Path(subject).name
+    for fname, err in r["errors"]:
+        if fname == mine:
+            return jsonify({"error": f"Could not read {mine}: {_friendly(err)}"}), 422
+    for fname, of in r["duplicates"]:
+        if fname == mine:
+            if saved is not None:
+                saved.unlink(missing_ok=True)            # a repeat adds nothing
+            row = conn.execute("SELECT title FROM papers WHERE sha=?", (of,)).fetchone()
+            return jsonify({"duplicate": True, "message":
+                            f"Already in your library as: {row['title'] if row else 'another copy'}"})
+    row = conn.execute("SELECT title FROM papers WHERE pdf_path=?", (subject,)).fetchone()
+    return jsonify({"added": 1 if row else 0, "title": row["title"] if row else mine})
 
 
 @bp.route("/api/library/status")

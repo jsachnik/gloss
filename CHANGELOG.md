@@ -13,6 +13,22 @@ how to restart.
 Versions are `major.minor.patch` — the patch number moves for fixes, the minor
 for refinements, the major for a change in how the reader itself works.
 
+## 1.2.1 — 2026-10-14
+
+- **A paper added twice at once vanished.** A PDF dropped into the library folder
+  and then added with **Add PDF** was scanned as two identical files; the second
+  matched the first by DOI, so the paper was recorded as a duplicate *of itself*,
+  overwrote its own record, and disappeared from the list and map. A paper can no
+  longer match itself or replace a stored record, and identical files in one scan
+  count as one paper (the plainest file name is kept).
+- **Add PDF reports on the file you added.** The verdict used to come from
+  everything the scan found, so an unrelated problem could discard a good upload.
+  It now compares the file's hash first, and says which paper a repeat duplicates.
+- **PDFs dropped into the folder by hand are found.** Opening Home reads any
+  unread PDFs in the library folder. Problems stay on screen until dismissed, and
+  an exhausted AI allowance is explained in plain words; the PDF stays in the
+  folder and is read the next time Gloss starts.
+
 ## 1.2.0 — 2026-10-07
 
 - **A local library.** Papers are kept in a folder you choose (default

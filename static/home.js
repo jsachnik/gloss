@@ -30,6 +30,7 @@ const shortLabel = (p) => `${(p.authors[0]?.name || "?").split(" ").pop()} ${p.y
 
 async function loadLibrary() {
   const data = await getJSON("/api/library");
+  state.unscanned = data.unscanned || 0;           // PDFs in the folder nobody has read yet
   const signature = JSON.stringify(data.papers.map((p) => [p.sha, p.summary_status, p.connected]));
   if (signature === state.signature) return;        // nothing changed: leave the page alone
   state.signature = signature;
@@ -494,10 +495,30 @@ $("search").addEventListener("input", renderList);
 
 /* --- adding PDFs ------------------------------------------------------------ */
 
-function notice(text) {
+function notice(text, sticky) {
   const box = $("notice");
+  clearTimeout(notice.timer);
   box.textContent = text; box.hidden = !text;
-  if (text) setTimeout(() => { box.hidden = true; }, 9000);
+  box.title = sticky ? "Click to dismiss" : "";
+  box.onclick = () => { box.hidden = true; };
+  if (text && !sticky) notice.timer = setTimeout(() => { box.hidden = true; }, 9000);
+}
+
+/* PDFs dropped into the library folder by hand: read them when Home opens. */
+async function autoScan() {
+  const n = state.unscanned;
+  if (!n) return;
+  notice(`Found ${n} new PDF${n > 1 ? "s" : ""} in your library folder \u2014 reading ${n > 1 ? "them" : "it"}\u2026`, true);
+  try {
+    const r = await postJSON("/api/library/scan");
+    const bits = [];
+    if (r.added) bits.push(`Added ${r.added} paper${r.added > 1 ? "s" : ""}.`);
+    if (r.duplicates.length) bits.push(`Already in your library: ${r.duplicates.join(", ")}.`);
+    r.errors.forEach(([name, why]) => bits.push(`Could not read ${name}: ${why}`));
+    notice(bits.join(" ") || "Nothing new to add.", r.errors.length > 0);
+  } catch (err) { notice(`Could not read the new PDFs: ${err.message}`, true); }
+  await loadLibrary(); pollStatus();
+  if (state.view === "map") loadGraph();
 }
 
 async function addFiles(files) {
@@ -513,12 +534,13 @@ async function addFiles(files) {
       const r = await fetch("/api/library/upload", { method: "POST", body: form });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) problems.push(data.error || `${file.name} failed`);
-      else if (data.duplicate) problems.push(`${file.name}: already in your library`);
+      else if (data.duplicate) problems.push(data.message || `${file.name}: already in your library`);
       else added += data.added || 0;
     } catch (err) { problems.push(`${file.name}: ${err.message}`); }
   }
   $("add").disabled = false;
-  notice(`Added ${added} paper${added === 1 ? "" : "s"}.` + (problems.length ? " " + problems.join(" · ") : ""));
+  notice(`Added ${added} paper${added === 1 ? "" : "s"}.` + (problems.length ? " " + problems.join(" · ") : ""),
+         problems.length > 0);
   await loadLibrary(); pollStatus();
   if (added && state.view === "map") loadGraph();     // new papers change the network
 }
@@ -608,6 +630,7 @@ $("chat-input").addEventListener("keydown", (e) => {
 (async function init() {
   await loadLibrary();
   pollStatus();
+  autoScan();
   const hash = location.hash.slice(1);
   if (["map", "timeline", "library"].includes(hash)) setView(hash);
 })();

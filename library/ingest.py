@@ -24,16 +24,16 @@ def _store(conn, sha: str, path: Path, meta: dict) -> str | None:
     nt = norm_text(meta["title"])
     dup = None
     if meta.get("doi"):
-        row = conn.execute("SELECT sha FROM papers WHERE doi=? AND duplicate_of IS NULL",
-                           (meta["doi"],)).fetchone()
+        row = conn.execute("SELECT sha FROM papers WHERE doi=? AND sha!=? AND duplicate_of IS NULL",
+                           (meta["doi"], sha)).fetchone()
         dup = row["sha"] if row else None
     if not dup and len(nt) >= 20:
-        row = conn.execute("SELECT sha FROM papers WHERE norm_title=? AND duplicate_of IS NULL",
-                           (nt,)).fetchone()
+        row = conn.execute("SELECT sha FROM papers WHERE norm_title=? AND sha!=? "
+                           "AND duplicate_of IS NULL", (nt, sha)).fetchone()
         dup = row["sha"] if row else None
 
     conn.execute(
-        """INSERT OR REPLACE INTO papers(sha,pdf_path,filename,title,year,venue,doi,abstract,
+        """INSERT OR IGNORE INTO papers(sha,pdf_path,filename,title,year,venue,doi,abstract,
                keywords_json,ref_text,norm_title,duplicate_of,meta_status)
            VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'ok')""",
         (sha, str(path), path.name, meta["title"], meta["year"], meta["venue"], meta["doi"],
@@ -67,6 +67,17 @@ def scan(folder: Path | None = None, use_llm_edges: bool = True, log=print) -> d
             report["same_file"].append(path.name)         # byte-identical copy
             continue
         fresh.append((sha, path))
+
+    # Two files with the same bytes in one scan (a PDF dropped into the folder and
+    # also uploaded, say) are one paper. Keep the plainest name -- "paper.pdf",
+    # not "paper (2).pdf" -- and count the rest as copies.
+    kept: dict[str, Path] = {}
+    for sha, path in sorted(fresh, key=lambda t: (len(t[1].name), str(t[1]))):
+        if sha in kept:
+            report["same_file"].append(path.name)
+        else:
+            kept[sha] = path
+    fresh = list(kept.items())
 
     def read(item):
         sha, path = item
