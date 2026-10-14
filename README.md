@@ -12,6 +12,52 @@ TAMU AI, OpenRouter, or a model running locally under Ollama. The PDF itself
 never leaves this Mac; only paragraph text is sent for summarizing, and with a
 local model not even that.
 
+## This fork vs. the original
+
+This is a fork of [aedessler/gloss](https://github.com/aedessler/gloss). The
+`library` branch keeps Dessler's reader exactly as it was and builds a
+**personal literature library** around it. It is based on the original at
+commit `9325102` (version 1.1.0); this branch is 1.2.x.
+
+| | Original Gloss (aedessler) | This fork (`library` branch) |
+|---|---|---|
+| **Opens on** | A start screen: choose a PDF, or pick from your 5 most recent | **Home**: every paper you have added, searchable, with Map, Timeline and Librarian |
+| **What is remembered** | Summaries cached per file; a short recent list. Questions you ask are not kept | Each paper's title, authors, year and DOI, its summary, and **every question you asked about it**, stored in a SQLite file beside your PDFs |
+| **Across papers** | Each paper stands alone | A **Map** of how papers connect (shared authors, citations, topic words, AI-judged relations; Articles or Authors) and a **Timeline** by year |
+| **Finding what to read** | — | A **Librarian** you can ask. It recommends only papers in your library, says what each asks and finds, flags gaps, and highlights its picks in blue on the list, map and timeline |
+| **Adding papers** | Choose a PDF or drag one in | Add PDF, or drop files into the library folder. Repeats are caught by file contents, DOI or title |
+| **Summarizing** | When you open a paper | Also in the background for the whole library, two requests at a time, waiting out rate limits |
+| **Pages** | `/` is the reader | `/` goes to `/home`; the reader is at `/read`; **Close** returns Home |
+| **Platform** | macOS (`install.command`, `run.command`, Finder dialog, TextEdit) | Those Mac scripts are untouched. **Windows is added**: `run.bat`, a native file dialog, setup below. Not yet tested on a Mac |
+
+**What did not change:** PDF extraction (`extract.py`), the two-pass
+summarizer and question answering (`summarize.py`), the provider layer
+(`llm.py`), the margin-note reader and its question panel, and `.env`
+configuration all behave as in the original.
+
+**What was added or touched:** new `library/` package, `templates/home.html`,
+`static/home.js`, `static/home.css`, `run.bat`, `gloss_icon.ico` and
+`docs/LIBRARY_DESIGN.md`. Of the original source code, only two files were
+edited: `app.py` (new routes, the Windows file dialog, startup) and
+`static/reader.js` (Close goes Home, saved questions reload when a paper is
+reopened). Four docs and config files were also updated: `README.md`,
+`CHANGELOG.md`, `.env.example` (one new setting, `GLOSS_LIBRARY`) and
+`.gitignore` (ignores `*.db`). Everything else is the original, unchanged.
+
+### Windows setup
+
+With Python 3 installed, in a terminal:
+
+```powershell
+python -m venv "$env:USERPROFILE\.venvs\gloss"
+& "$env:USERPROFILE\.venvs\gloss\Scripts\python.exe" -m pip install -r requirements.txt
+copy .env.example .env
+```
+
+Put your provider key in `.env` (or, for TAMU AI,
+`%USERPROFILE%\.config\tamu-ai\api-key`), then double-click **`run.bat`**. The
+macOS-specific steps in *Setup* below do not apply on Windows.
+
 ## Setup
 
 Double-click **`install.command`** in Finder. It builds a Python environment at
