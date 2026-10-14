@@ -202,6 +202,19 @@ an edit returns you to the old copy — the terminal points this out when the tw
 versions differ. Press Ctrl-C in the window running Gloss and start it again to
 pick up newer code.
 
+## Contributors
+
+This fork adds the local library, map, timeline and Librarian (the `library`
+branch) on top of the original Gloss.
+
+1. **Claude** — Anthropic's AI model, working through Claude Code: designed and
+   wrote the library, map, timeline and Librarian, and the Windows support.
+2. **[@jsachnik](https://github.com/jsachnik)** — directed the work, supplied the
+   idea and the test library, and tested every step.
+
+The original Gloss reader and summarizer are by
+[@aedessler](https://github.com/aedessler), and this fork's changes are built on them.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
